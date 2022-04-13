@@ -22,8 +22,8 @@ import torch.utils.data
 
 import dataset_toybox
 import dataset_core50
+import dataset_imagenet12
 import parse_config
-import dataloader_imagenet12
 import utils
 
 IN12_MEAN = (0.485, 0.456, 0.406)

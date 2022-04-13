@@ -14,7 +14,7 @@ import cv2
 import math
 
 import dataloader_toybox_old
-import dataloader_imagenet12
+import dataset_imagenet12
 import parse_config
 import Evaluator
 
