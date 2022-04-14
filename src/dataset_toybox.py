@@ -37,6 +37,7 @@ class ToyboxDataset(torch.utils.data.Dataset):
         self.num_instances = num_instances
         self.num_images_per_class = num_images_per_class
         self.views = []
+        self.logger = logging.getLogger(__name__)
         for view in views:
             assert view in toybox_videos
             self.views.append(view)
@@ -44,7 +45,6 @@ class ToyboxDataset(torch.utils.data.Dataset):
             assert os.path.isdir(self.data_path)
         except AssertionError:
             raise AssertionError("Data directory not found:", self.data_path)
-        print(self.views)
         self.label_key = 'Class ID'
         if self.hypertune:
             self.trainImagesFile = self.data_path + "toybox_data_interpolated_cropped_dev.pickle"
@@ -68,12 +68,12 @@ class ToyboxDataset(torch.utils.data.Dataset):
             self.set_train_indices()
             self.verify_train_indices()
             if self.num_images_per_class > 0:
-                logging.debug("Loaded dataset with {} instances from each class and {} images from each class "
-                              "divided equally amongst chosen instances....".format(self.num_instances,
-                                                                                    self.num_images_per_class))
+                self.logger.debug("Loaded dataset with {} instances from each class and {} images from each class "
+                                  "divided equally amongst chosen instances....".format(self.num_instances,
+                                                                                        self.num_images_per_class))
             else:
-                logging.debug("Loaded dataset with {} instances from each class and all images from each of the chosen "
-                              "instances....".format(self.num_instances))
+                self.logger.debug("Loaded dataset with {} instances from each class and all images from each of the "
+                                  "chosen instances....".format(self.num_instances))
         else:
             with open(self.testImagesFile, "rb") as pickleFile:
                 self.test_data = pickle.load(pickleFile)
@@ -119,9 +119,9 @@ class ToyboxDataset(torch.utils.data.Dataset):
             assert view in self.views
         for cl in toybox_classes:
             assert len(unique_objs[cl]) == self.num_instances
-        logging.debug("Verified that all chosen images correspond to {} instances for each "
-                      "class....".format(self.num_instances))
-        logging.debug("Verified that all images selected come from the specified views...")
+        self.logger.debug("Verified that all chosen images correspond to {} instances for each "
+                          "class....".format(self.num_instances))
+        self.logger.debug("Verified that all images selected come from the specified views...")
             
     def set_train_indices(self):
         """

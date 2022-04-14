@@ -33,8 +33,24 @@ TOYBOX_STD = (0.1623, 1894, 1775)
 CORE50_MEAN = (0.5980, 0.5622, 0.5363)
 CORE50_STD = (0.2102, 0.2199, 0.2338)
 ALL_DATASETS = ["Toybox", "IN12", "CORE50"]
+
+TOYBOX_DATA_PATH = "../data_12/Toybox/"
+IN12_DATA_PATH = "../data_12/IN-12/"
+CORE50_DATA_PATH = "../../toybox-representation-learning/data/"
+
 OUTPUT_DIR = "../out/"
 CONFIG_DIR = "../configs/"
+
+COLOR = {
+    "HEADER": "\033[95m",
+    "BLUE": "\033[94m",
+    "GREEN": "\033[92m",
+    "RED": "\033[91m",
+    "ENDC": "\033[0m",
+}
+LOG_FORMAT_TERMINAL = '%(asctime)s:' + COLOR['GREEN'] + '%(filename)s' + COLOR['ENDC'] + ':%(lineno)s:' + COLOR['RED'] \
+                      + '%(levelname)s' + COLOR['ENDC'] + ': %(message)s'
+LOG_FORMAT_FILE = '%(asctime)s:%(filename)s:%(lineno)s:%(levelname)s:%(message)s'
 
 
 class Experiment:
@@ -193,12 +209,12 @@ class Experiment:
         else:
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=1.0)
             
-        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1,
-                                                             total_iters=2*len(self.loader))
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01,
+                                                             total_iters=2*len(self.loader)-1)
         
         combined_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer=optimizer,
                                                                    schedulers=[warmup_scheduler, scheduler],
-                                                                   milestones=[2*len(self.loader) - 1])
+                                                                   milestones=[2*len(self.loader)-1])
         # Set train() for network components. Only matters for regularization
         # techniques like dropout and batchnorm.
         self.classifier.train()
@@ -207,6 +223,7 @@ class Experiment:
         num_epochs = tr_args['num_epochs']
         avg_loss = 0.0
         total_batches = 0
+        batch_lr = optimizer.param_groups[0]['lr']
         for epoch in range(1, num_epochs + 1):
             tqdm_bar = tqdm(self.loader)
             batch_counter = 0
@@ -229,10 +246,10 @@ class Experiment:
                 batch_counter += 1
                 total_batches += 1
                 avg_loss = total_loss / batch_counter
-                
+                batch_lr = optimizer.param_groups[0]['lr']
                 if self.config_dict['save']:
-                    tb_writer.add_scalar(tag="LR/" + comp_name, scalar_value=optimizer.param_groups[0]['lr'],
-                                         global_step=total_batches)
+                    tb_writer.add_scalar(tag=comp_name + '/LR', scalar_value=batch_lr, global_step=total_batches)
+                    
                     if (total_batches % len(self.loader) == 1 or total_batches == num_epochs * len(self.loader)) and \
                             tr_args['log_test_error'] and self.test_loader is not None:
                         
@@ -254,28 +271,27 @@ class Experiment:
                             test_loss_total += test_loss.item()
                             batch_count_loss += 1
                         avg_loss_test = test_loss_total / batch_count_loss
-                        tb_writer.add_scalars(main_tag='Loss/' + comp_name,
+                        tb_writer.add_scalars(main_tag=comp_name + '/Loss',
                                               tag_scalar_dict={'avg_loss_train': avg_loss,
                                                                'batch_loss_train': loss.item(),
-                                                               'batch_loss_test': avg_loss_test
+                                                               'loss_test': avg_loss_test
                                                                },
                                               global_step=total_batches)
                     else:
-                        tb_writer.add_scalars(main_tag='Loss/' + comp_name,
+                        tb_writer.add_scalars(main_tag=comp_name + '/Loss',
                                               tag_scalar_dict={'avg_loss_train': avg_loss,
                                                                'batch_loss_train': loss.item()
                                                                },
                                               global_step=total_batches)
                 
                 tqdm_bar.set_description("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs,
-                                                                                             optimizer.param_groups[0][
-                                                                                                 'lr'], avg_loss))
-
+                                                                                             batch_lr, avg_loss))
+                
                 combined_scheduler.step()
+            
             # Write average training error at end of epoch into log file.
-            logger.info("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs,
-                                                                            optimizer.param_groups[0]['lr'],
-                                                                            avg_loss))
+            logger.info("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs, batch_lr, avg_loss))
+            
             tqdm_bar.close()
         
         # If models have to be saved, save both classifier and backbone in the
@@ -426,13 +442,14 @@ class Experiment:
         for dname in ALL_DATASETS:
             if dname.lower() in train_dataset_name:
                 num_matches += 1
-        assert num_matches == 1, "Make sure the dataset name for component {} is unique...".format(comp)
+        assert num_matches == 1, "Make sure the dataset name for component {} is unique and one of [{}]..." \
+                                 "".format(comp, ", ".join(ALL_DATASETS))
         
         if 'toybox' in train_dataset_name:
             logger.debug("The training dataset is Toybox. Preparing to initialize train_data....")
             train_transform = self.get_train_transform(mean=TOYBOX_MEAN, std=TOYBOX_STD)
             train_data = parse_config.get_dataset(dataset_toybox, 'ToyboxDataset',
-                                                  root="../data_12/Toybox/",
+                                                  root=TOYBOX_DATA_PATH,
                                                   transform=train_transform, num_instances=tr_args['num_instances'],
                                                   rng=np.random.default_rng(self.config_dict['seed']), hypertune=False,
                                                   num_images_per_class=tr_args['num_images_per_class'],
@@ -443,15 +460,15 @@ class Experiment:
         elif "in12" in train_dataset_name:
             logger.debug("The training dataset is ImageNet+COCO. Preparing to initialize train_data....")
             train_transform = self.get_train_transform(mean=IN12_MEAN, std=IN12_STD)
-            train_data = parse_config.get_dataset(dataloader_imagenet12, 'DataLoaderGeneric', transform=train_transform,
-                                                  train=True)
+            train_data = parse_config.get_dataset(dataset_imagenet12, 'DataLoaderGeneric', root=IN12_DATA_PATH,
+                                                  transform=train_transform, train=True)
             if self.config_dict[comp]['args']['log_test_error']:
                 self.set_testing_data(test_set='imagenet_test')
         else:
             logger.debug("The training dataset is CoRE50. Preparing to initialize train_data....")
             train_transform = self.get_train_transform(mean=CORE50_MEAN, std=CORE50_STD)
             train_data = parse_config.get_dataset(dataset_core50, 'DatasetCoRE50',
-                                                  root="../../toybox-representation-learning/data/", train=True,
+                                                  root=CORE50_DATA_PATH, train=True,
                                                   transform=train_transform, fraction=0.1)
             if self.config_dict[comp]['args']['log_test_error']:
                 self.set_testing_data(test_set='core50_test')
@@ -480,7 +497,7 @@ class Experiment:
                 self.test_loader_name = "toybox_train"
                 logger.debug("Loading toybox train set....")
                 test_data = parse_config.get_dataset(dataset_toybox, 'ToyboxDataset',
-                                                     root="../data_12/Toybox/",
+                                                     root=TOYBOX_DATA_PATH,
                                                      transform=test_transform, num_instances=-1,
                                                      rng=np.random.default_rng(0), hypertune=False,
                                                      num_images_per_class=1000, train=True)
@@ -488,7 +505,7 @@ class Experiment:
                 self.test_loader_name = "toybox_test"
                 logger.debug("Loading toybox test set....")
                 test_data = parse_config.get_dataset(dataset_toybox, 'ToyboxDataset',
-                                                     root="../data_12/Toybox/",
+                                                     root=TOYBOX_DATA_PATH,
                                                      transform=test_transform, rng=np.random.default_rng(0),
                                                      hypertune=False, train=False)
         elif "in12" in test_set:
@@ -497,13 +514,13 @@ class Experiment:
             if 'train' in test_set:
                 self.test_loader_name = "imagenet_coco_train"
                 logger.debug("Loading imagenet+coco train set....")
-                test_data = parse_config.get_dataset(dataloader_imagenet12, 'DataLoaderGeneric', train=True,
-                                                     transform=test_transform)
+                test_data = parse_config.get_dataset(dataset_imagenet12, 'DataLoaderGeneric', train=True,
+                                                     root=IN12_DATA_PATH, transform=test_transform)
             else:
                 self.test_loader_name = "imagenet_coco_test"
                 logger.debug("Loading imagenet+coco test set....")
-                test_data = parse_config.get_dataset(dataloader_imagenet12, 'DataLoaderGeneric', train=False,
-                                                     transform=test_transform)
+                test_data = parse_config.get_dataset(dataset_imagenet12, 'DataLoaderGeneric', train=False,
+                                                     root=IN12_DATA_PATH, transform=test_transform)
         else:
             test_transform = self.get_test_transform(mean=CORE50_MEAN, std=CORE50_STD, ten_crop=ten_crop)
     
@@ -511,13 +528,13 @@ class Experiment:
                 self.test_loader_name = "core50_train"
                 logger.debug("Loading core50 train set....")
                 test_data = parse_config.get_dataset(dataset_core50, 'DatasetCoRE50', train=True,
-                                                     root="../../toybox-representation-learning/data/",
+                                                     root=CORE50_DATA_PATH,
                                                      transform=test_transform, fraction=0.1)
             else:
                 self.test_loader_name = "core50_test"
                 logger.debug("Loading core50 test set....")
                 test_data = parse_config.get_dataset(dataset_core50, 'DatasetCoRE50',
-                                                     root="../../toybox-representation-learning/data/", train=False,
+                                                     root=CORE50_DATA_PATH, train=False,
                                                      transform=test_transform)
         
         self.test_loader = torch.utils.data.DataLoader(test_data, batch_size=32,
@@ -538,9 +555,8 @@ if __name__ == "__main__":
     args = vars(utils.get_parser())
     
     log_level = getattr(logging, args['log_level'].upper())
-    log_format = '%(asctime)s:%(filename)s:%(lineno)s:%(levelname)s: %(message)s'
-    logging.basicConfig(format=log_format, level=log_level)
-    logger = logging.getLogger(__name__)
+    logging.basicConfig(format=LOG_FORMAT_TERMINAL, level=log_level)
+    logger = logging.getLogger()
     
     logger.info("Initialized logger. Trying to load config file: %s", args['config_file'])
     try:
@@ -567,7 +583,7 @@ if __name__ == "__main__":
             yaml_dict['save_dir'] = dir_name
             logging_file = yaml_dict['save_dir'] + "log.txt"
             logfile_handler = logging.FileHandler(logging_file)
-            logging_formatter = logging.Formatter(log_format)
+            logging_formatter = logging.Formatter(LOG_FORMAT_FILE)
             logfile_handler.setFormatter(logging_formatter)
             logger.addHandler(logfile_handler)
     else:
