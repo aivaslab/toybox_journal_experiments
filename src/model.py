@@ -19,6 +19,7 @@ import logging
 import datetime
 import torch.utils.tensorboard as tb
 import torch.utils.data
+import pytorch_model_summary
 
 import dataset_toybox
 import dataset_core50
@@ -94,6 +95,7 @@ class Experiment:
         logger.info("Loading model backbone: %s and fc layer....", self.config_dict['model']['name'])
         self.backbone = parse_config.get_model_name(models, self.config_dict['model']['name'],
                                                     **self.config_dict['model']['args'])
+        logger.debug(pytorch_model_summary.summary(self.backbone, torch.zeros((1, 3, 224, 224)), show_input=True))
         self.fc_size = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
         self.classifier = nn.Linear(self.fc_size, 12)
@@ -176,6 +178,94 @@ class Experiment:
         
         return trnsfrm
     
+    def prepare_model_for_run(self):
+        """
+        This method prepares the backbone and classifier for a training run.
+        """
+        tr_args = self.run_args
+        assert 'layers_frozen' in tr_args.keys()
+        layers_frozen = tr_args['layers_frozen']
+    
+        # Set which weights will be updated according to config.
+        # Set train() for network components. Only matters for regularization
+        # techniques like dropout and batchnorm.
+        # Set optimizer and add which weights are to be optimized acc. to config.
+        for params in self.classifier.parameters():
+            params.requires_grad = True
+        for params in self.backbone.parameters():
+            params.requires_grad = True
+    
+        self.classifier.train()
+        optimizer = parse_config.get_optimizer_name(torch.optim, tr_args['optimizer'], self.classifier.parameters(),
+                                                    **tr_args['optimizer_args'])
+        if layers_frozen > -1:
+            for params in self.backbone.conv1.parameters():
+                params.requires_grad = False
+            for params in self.backbone.bn1.parameters():
+                params.requires_grad = False
+            for params in self.backbone.relu.parameters():
+                params.requires_grad = False
+            for params in self.backbone.maxpool.parameters():
+                params.requires_grad = False
+            logger.info("Freezing conv1, bn1, relu, maxpool...")
+        else:
+            optimizer.add_param_group({'params': self.backbone.conv1.parameters()})
+            optimizer.add_param_group({'params': self.backbone.bn1.parameters()})
+            optimizer.add_param_group({'params': self.backbone.relu.parameters()})
+            optimizer.add_param_group({'params': self.backbone.maxpool.parameters()})
+            logger.info("Adding conv1, bn1, relu, maxpool to optimizer...")
+        layer_mode = False if layers_frozen > -1 else True
+        self.backbone.conv1.train(mode=layer_mode)
+        self.backbone.bn1.train(mode=layer_mode)
+        self.backbone.relu.train(mode=layer_mode)
+        self.backbone.maxpool.train(mode=layer_mode)
+    
+        if layers_frozen > 0:
+            for params in self.backbone.layer1.parameters():
+                params.requires_grad = False
+            logger.info("Freezing layer1")
+        else:
+            optimizer.add_param_group({'params': self.backbone.layer1.parameters()})
+            logger.info("Adding layer1 to optimizer")
+        layer_mode = False if layers_frozen > 0 else True
+        self.backbone.layer1.train(mode=layer_mode)
+    
+        if layers_frozen > 1:
+            for params in self.backbone.layer2.parameters():
+                params.requires_grad = False
+            logger.info("Freezing layer2")
+        else:
+            optimizer.add_param_group({'params': self.backbone.layer2.parameters()})
+            logger.info("Adding layer2 to optimizer")
+        layer_mode = False if layers_frozen > 1 else True
+        self.backbone.layer2.train(mode=layer_mode)
+    
+        if layers_frozen > 2:
+            for params in self.backbone.layer3.parameters():
+                params.requires_grad = False
+            logger.info("Freezing layer3")
+        else:
+            optimizer.add_param_group({'params': self.backbone.layer3.parameters()})
+            logger.info("Adding layer3 to optimizer")
+        layer_mode = False if layers_frozen > 2 else True
+        self.backbone.layer3.train(mode=layer_mode)
+    
+        if layers_frozen > 3:
+            for params in self.backbone.layer4.parameters():
+                params.requires_grad = False
+            for params in self.backbone.avgpool.parameters():
+                params.requires_grad = False
+            logger.info("Freezing layer4, avgpool")
+        else:
+            optimizer.add_param_group({'params': self.backbone.layer4.parameters()})
+            optimizer.add_param_group({'params': self.backbone.avgpool.parameters()})
+            logger.info("Adding layer4, avgpool to optimizer")
+        layer_mode = False if layers_frozen > 3 else True
+        self.backbone.layer4.train(mode=layer_mode)
+        self.backbone.avgpool.train(mode=layer_mode)
+    
+        return optimizer
+        
     def train_model(self):
         """
         Method to train the model for a train component in experiment.
@@ -188,38 +278,28 @@ class Experiment:
         if tr_args['num_epochs'] == 0:
             # No training required if number of epochs is 0
             return
-        assert 'train_classifier_only' in tr_args.keys()
         
-        # Set which weights will be updated according to config.
-        for params in self.classifier.parameters():
-            params.requires_grad = True
-        for params in self.backbone.parameters():
-            params.requires_grad = not tr_args['train_classifier_only']
-        
-        # Set optimizer and add which weights are to be optimized acc. to config.
-        optimizer = parse_config.get_optimizer_name(torch.optim, tr_args['optimizer'], self.classifier.parameters(),
-                                                    **tr_args['optimizer_args'])
-        if not tr_args['train_classifier_only']:
-            optimizer.add_param_group({'params': self.backbone.parameters()})
-        
+        optimizer = self.prepare_model_for_run()
+        total_params = sum(p.numel() for p in self.backbone.parameters())
+        train_params = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
+        logger.info("{}/{} parameters in the backbone are trainable...".format(train_params, total_params))
+        total_params = sum(p.numel() for p in self.classifier.parameters())
+        train_params = sum(p.numel() for p in self.classifier.parameters() if p.requires_grad)
+        logger.info("{}/{} parameters in the classifier are trainable...".format(train_params, total_params))
         # Set lr scheduler for training experiment.
         if 'lr_scheduler' in tr_args.keys():
             scheduler = parse_config.get_scheduler_name(torch.optim.lr_scheduler, tr_args['lr_scheduler'], optimizer,
                                                         **tr_args['lr_scheduler_args'])
         else:
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=1.0)
-            
+    
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01,
                                                              total_iters=2*len(self.loader)-1)
-        
+    
         combined_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer=optimizer,
                                                                    schedulers=[warmup_scheduler, scheduler],
                                                                    milestones=[2*len(self.loader)-1])
-        # Set train() for network components. Only matters for regularization
-        # techniques like dropout and batchnorm.
-        self.classifier.train()
-        self.backbone.train(not tr_args['train_classifier_only'])
-        
+    
         num_epochs = tr_args['num_epochs']
         avg_loss = 0.0
         total_batches = 0
@@ -233,14 +313,14 @@ class Experiment:
                 images = images.cuda(0)
                 labels = labels.cuda(0)
                 optimizer.zero_grad()
-                
+            
                 # Forward-prop, then calculate gradients and one step through optimizer
                 feats = self.backbone.forward(images)
                 logits = self.classifier.forward(feats)
                 loss = nn.CrossEntropyLoss()(logits, labels)
                 loss.backward()
                 optimizer.step()
-                
+            
                 # Update progress bar, loss-tracking and other variables.
                 total_loss += loss.item()
                 batch_counter += 1
@@ -249,10 +329,10 @@ class Experiment:
                 batch_lr = optimizer.param_groups[0]['lr']
                 if self.config_dict['save']:
                     tb_writer.add_scalar(tag=comp_name + '/LR', scalar_value=batch_lr, global_step=total_batches)
-                    
+                
                     if (total_batches % len(self.loader) == 1 or total_batches == num_epochs * len(self.loader)) and \
                             tr_args['log_test_error'] and self.test_loader is not None:
-                        
+                    
                         test_loss_total = 0.0
                         batch_count_loss = 0
                         for _, (indices_test, images_test, labels_test) in enumerate(self.test_loader):
@@ -283,17 +363,17 @@ class Experiment:
                                                                'batch_loss_train': loss.item()
                                                                },
                                               global_step=total_batches)
-                
+            
                 tqdm_bar.set_description("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs,
                                                                                              batch_lr, avg_loss))
-                
-                combined_scheduler.step()
             
+                combined_scheduler.step()
+        
             # Write average training error at end of epoch into log file.
             logger.info("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs, batch_lr, avg_loss))
-            
-            tqdm_bar.close()
         
+            tqdm_bar.close()
+    
         # If models have to be saved, save both classifier and backbone in the
         # directory specified in 'save_dir' of config_dict.
         if self.config_dict['save']:
