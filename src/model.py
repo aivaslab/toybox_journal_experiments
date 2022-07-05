@@ -133,7 +133,15 @@ class Experiment:
         torch.cuda.set_device(gpu)
         self.backbone.cuda(gpu)
         self.classifier.cuda(gpu)
-    
+
+    @staticmethod
+    def weights_init(m):
+        """
+        Reset weights of the network
+        """
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform(m.weight.data)
+            
     @staticmethod
     def get_train_transform(mean, std):
         """
@@ -185,7 +193,9 @@ class Experiment:
         tr_args = self.run_args
         assert 'layers_frozen' in tr_args.keys()
         layers_frozen = tr_args['layers_frozen']
-    
+        if tr_args['reset_params']:
+            logger.info("Resetting classifier weights....")
+            self.classifier.apply(self.weights_init)
         # Set which weights will be updated according to config.
         # Set train() for network components. Only matters for regularization
         # techniques like dropout and batchnorm.
@@ -209,6 +219,12 @@ class Experiment:
                 params.requires_grad = False
             logger.info("Freezing conv1, bn1, relu, maxpool...")
         else:
+            if tr_args['reset_params']:
+                logger.info("Resetting conv1, bn1, relu, maxpool weights....")
+                self.backbone.conv1.apply(self.weights_init)
+                self.backbone.bn1.apply(self.weights_init)
+                self.backbone.relu.apply(self.weights_init)
+                self.backbone.maxpool.apply(self.weights_init)
             optimizer.add_param_group({'params': self.backbone.conv1.parameters()})
             optimizer.add_param_group({'params': self.backbone.bn1.parameters()})
             optimizer.add_param_group({'params': self.backbone.relu.parameters()})
@@ -225,6 +241,9 @@ class Experiment:
                 params.requires_grad = False
             logger.info("Freezing layer1")
         else:
+            if tr_args['reset_params']:
+                logger.info("Resetting layer1 weights....")
+                self.backbone.layer1.apply(self.weights_init)
             optimizer.add_param_group({'params': self.backbone.layer1.parameters()})
             logger.info("Adding layer1 to optimizer")
         layer_mode = False if layers_frozen > 0 else True
@@ -235,6 +254,9 @@ class Experiment:
                 params.requires_grad = False
             logger.info("Freezing layer2")
         else:
+            if tr_args['reset_params']:
+                logger.info("Resetting layer2 weights....")
+                self.backbone.layer2.apply(self.weights_init)
             optimizer.add_param_group({'params': self.backbone.layer2.parameters()})
             logger.info("Adding layer2 to optimizer")
         layer_mode = False if layers_frozen > 1 else True
@@ -245,6 +267,9 @@ class Experiment:
                 params.requires_grad = False
             logger.info("Freezing layer3")
         else:
+            if tr_args['reset_params']:
+                logger.info("Resetting layer3 weights....")
+                self.backbone.layer3.apply(self.weights_init)
             optimizer.add_param_group({'params': self.backbone.layer3.parameters()})
             logger.info("Adding layer3 to optimizer")
         layer_mode = False if layers_frozen > 2 else True
@@ -257,6 +282,10 @@ class Experiment:
                 params.requires_grad = False
             logger.info("Freezing layer4, avgpool")
         else:
+            if tr_args['reset_params']:
+                logger.info("Resetting layer4, avgpool weights....")
+                self.backbone.layer4.apply(self.weights_init)
+                self.backbone.avgpool.apply(self.weights_init)
             optimizer.add_param_group({'params': self.backbone.layer4.parameters()})
             optimizer.add_param_group({'params': self.backbone.avgpool.parameters()})
             logger.info("Adding layer4, avgpool to optimizer")
@@ -275,11 +304,11 @@ class Experiment:
         """
         comp_name = self.components[self.run_id]
         tr_args = self.run_args
+        
+        optimizer = self.prepare_model_for_run()
         if tr_args['num_epochs'] == 0:
             # No training required if number of epochs is 0
             return
-        
-        optimizer = self.prepare_model_for_run()
         total_params = sum(p.numel() for p in self.backbone.parameters())
         train_params = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
         logger.info("{}/{} parameters in the backbone are trainable...".format(train_params, total_params))
