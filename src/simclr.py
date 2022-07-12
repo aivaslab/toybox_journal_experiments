@@ -7,6 +7,8 @@ import torch.nn.functional as f
 import torchvision.transforms as transforms
 import torchvision.models as models
 import tqdm
+import torch.utils.tensorboard as tb
+import argparse
 
 import dataset_ssl_in12
 
@@ -64,7 +66,13 @@ class SimCLR:
     Class implementing SimCLR algorithm
     """
 
-    def __init__(self):
+    def __init__(self, exp_args):
+        self.args = exp_args
+        self.num_epochs = self.args['num_epochs']
+        self.lr = self.args['lr']
+        self.save = self.args['save']
+        self.b_size = self.args['batch_size']
+        self.fraction = self.args['fraction']
         self.net = Network()
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
@@ -78,13 +86,16 @@ class SimCLR:
             transforms.ToTensor(),
             transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
         ])
-        self.train_data = dataset_ssl_in12.DatasetIN12(fraction=0.5, transform=self.train_transform)
-        self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=64, shuffle=True, num_workers=8)
+        self.train_data = dataset_ssl_in12.DatasetIN12(fraction=self.fraction, transform=self.train_transform)
+        self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=self.b_size, shuffle=True,
+                                                        num_workers=8)
 
-    def train(self, num_epochs):
+    def train(self):
         """
         Train the network using the SimCLR algorithm
         """
+        if self.save:
+            tb_writer = tb.SummaryWriter(log_dir="../out/temp/")
         for params in self.net.backbone.parameters():
             params.requires_grad = True
         for params in self.net.fc.parameters():
@@ -92,10 +103,13 @@ class SimCLR:
         self.net.backbone.train()
         self.net.fc.train()
         self.net.cuda()
-        optimizer = torch.optim.Adam(self.net.backbone.parameters(), lr=1e-1, weight_decay=1e-6)
+        optimizer = torch.optim.Adam(self.net.backbone.parameters(), lr=self.lr, weight_decay=1e-6)
         optimizer.add_param_group({'params': self.net.fc.parameters()})
-
-        for ep in range(1, num_epochs + 1):
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                                  T_max=self.num_epochs * len(self.train_loader),
+                                                                  eta_min=1e-6)
+        total_batches = 0
+        for ep in range(1, self.num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.train_loader)
             batches = 0
             total_loss = 0.0
@@ -108,13 +122,20 @@ class SimCLR:
                 loss = nn.CrossEntropyLoss()(logits, labels)
                 total_loss += loss.item()
                 batches += 1
+                total_batches += 1
                 tqdm_bar.set_description("Epochs: {}/{}  LR: {:.4f}  Loss:{:.6f}"
-                                         .format(ep, num_epochs, optimizer.param_groups[0]['lr'], total_loss/batches))
+                                         .format(ep, self.num_epochs, optimizer.param_groups[0]['lr'],
+                                                 total_loss/batches))
+                if self.save:
+                    tb_writer.add_scalar(tag='Loss/Batch', scalar_value=loss.item(), global_step=total_batches)
+                    tb_writer.add_scalar(tag='Loss/Avg', scalar_value=total_loss/batches,
+                                         global_step=total_batches)
+                    tb_writer.add_scalar(tag='LR', scalar_value=optimizer.param_groups[0]['lr'],
+                                         global_step=total_batches)
                 loss.backward()
                 optimizer.step()
+                lr_scheduler.step()
             tqdm_bar.close()
-            if (ep + 1) % 10 == 0:
-                optimizer.param_groups[0]['lr'] *= 0.8
         import os
         if not os.path.isdir("../out/temp/"):
             os.mkdir("../out/temp/")
@@ -123,6 +144,20 @@ class SimCLR:
         torch.save(dummy_classifier.state_dict(), "../out/temp/ssl_resnet18_classifier.pt")
 
 
+def get_parser():
+    """
+    Create parser and return it for the algorithm
+    """
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--num_epochs", "-e", default=10, type=int)
+    parser.add_argument("--save", "-s", default=False, action='store_true')
+    parser.add_argument("--lr", "-lr", type=float, default=1e-1)
+    parser.add_argument("--batch_size", "-b", type=int, default=64)
+    parser.add_argument("--fraction", "-f", type=float, default=0.1)
+    return parser.parse_args()
+
+    
 if __name__ == "__main__":
-    exp = SimCLR()
-    exp.train(num_epochs=5)
+    args = vars(get_parser())
+    exp = SimCLR(exp_args=args)
+    exp.train()
