@@ -63,13 +63,15 @@ class SimCLR:
     """
     Class implementing SimCLR algorithm
     """
-    
+
     def __init__(self):
         self.net = Network()
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, hue=0.2, saturation=0.2),
-            transforms.Resize(256),
+            transforms.Resize(270),
+            transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.GaussianBlur(kernel_size=5),
             transforms.RandomResizedCrop(size=224, scale=(0.8, 1.2),
                                          interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.RandomHorizontalFlip(),
@@ -77,8 +79,8 @@ class SimCLR:
             transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
         ])
         self.train_data = dataset_ssl_in12.DatasetIN12(fraction=0.5, transform=self.train_transform)
-        self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=64, shuffle=True, num_workers=4)
-    
+        self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=64, shuffle=True, num_workers=8)
+
     def train(self, num_epochs):
         """
         Train the network using the SimCLR algorithm
@@ -92,7 +94,7 @@ class SimCLR:
         self.net.cuda()
         optimizer = torch.optim.Adam(self.net.backbone.parameters(), lr=1e-1, weight_decay=1e-6)
         optimizer.add_param_group({'params': self.net.fc.parameters()})
-        
+
         for ep in range(1, num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.train_loader)
             batches = 0
@@ -110,11 +112,12 @@ class SimCLR:
                                          .format(ep, num_epochs, optimizer.param_groups[0]['lr'], total_loss/batches))
                 loss.backward()
                 optimizer.step()
-            if (ep + 1) % 3 == 0:
-                optimizer.param_groups[0]['lr'] *= 0.8
             tqdm_bar.close()
+            if (ep + 1) % 10 == 0:
+                optimizer.param_groups[0]['lr'] *= 0.8
         import os
-        os.mkdir("../runs/temp/")
+        if not os.path.isdir("../out/temp/"):
+            os.mkdir("../out/temp/")
         torch.save(self.net.backbone.state_dict(), "../out/temp/ssl_resnet18_backbone.pt")
         dummy_classifier = nn.Linear(512, 12)
         torch.save(dummy_classifier.state_dict(), "../out/temp/ssl_resnet18_classifier.pt")

@@ -41,19 +41,24 @@ class DatasetIN12(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     import torchvision.transforms as transforms
-    tr = transforms.Compose([transforms.ToPILImage(),
-                             transforms.ColorJitter(brightness=0.2, hue=0.2, saturation=0.2),
-                             transforms.Resize(256),
-                             transforms.RandomResizedCrop(size=224, scale=(0.8, 1.33),
-                                                          interpolation=transforms.InterpolationMode.BICUBIC),
-                             transforms.RandomHorizontalFlip(),
-                             transforms.ToTensor()
-                             ])
-    train_data = DatasetIN12(fraction=1.0, transform=tr)
+
+    train_transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.GaussianBlur(kernel_size=5),
+        transforms.Resize(256),
+        transforms.RandomResizedCrop(size=224, scale=(0.8, 1.2),
+                                     interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        # transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
+    ])
+    train_data = DatasetIN12(fraction=0.1, transform=train_transform)
     print(len(train_data))
-    idx, images = train_data[0]
-    im = transforms.ToPILImage()(images[0])
-    im.show()
-    im2 = transforms.ToPILImage()(images[1])
-    im2.show()
-    
+    for i in range(5):
+        idx, images = train_data[i]
+        im = transforms.ToPILImage()(images[0])
+        im.show()
+        im2 = transforms.ToPILImage()(images[1])
+        im2.show()
