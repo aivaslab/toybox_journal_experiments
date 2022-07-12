@@ -9,6 +9,7 @@ import torchvision.models as models
 import tqdm
 import torch.utils.tensorboard as tb
 import argparse
+import os
 
 import dataset_ssl_in12
 
@@ -44,11 +45,15 @@ class Network(nn.Module):
     SimCLR Network
     """
     
-    def __init__(self):
+    def __init__(self, backbone_file=""):
         super().__init__()
+        self.backbone_file = backbone_file
         self.backbone = models.resnet18(pretrained=False)
         self.fc_size = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
+        if os.path.isfile(self.backbone_file):
+            print("Loading weights from:", self.backbone_file)
+            self.backbone.load_state_dict(torch.load(self.backbone_file))
         self.fc = nn.Sequential(nn.Linear(self.fc_size, self.fc_size), nn.ReLU(inplace=True),
                                 nn.Linear(self.fc_size, 128))
     
@@ -73,7 +78,10 @@ class SimCLR:
         self.save = self.args['save']
         self.b_size = self.args['batch_size']
         self.fraction = self.args['fraction']
-        self.net = Network()
+        self.backbone_file_name = self.args['backbone_file']
+        self.layers_frozen = self.args['layers_frozen']
+        self.net = Network(backbone_file=self.backbone_file_name)
+        
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize(270),
@@ -86,28 +94,101 @@ class SimCLR:
             transforms.ToTensor(),
             transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
         ])
+        
         self.train_data = dataset_ssl_in12.DatasetIN12(fraction=self.fraction, transform=self.train_transform)
         self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=self.b_size, shuffle=True,
                                                         num_workers=8)
-
+        
+    def prepare_network_for_training(self):
+        """
+        Adjusts the requires_grad parameters of the network and initializes optimizer
+        """
+        for params in self.net.fc.parameters():
+            params.requires_grad = True
+        for params in self.net.backbone.parameters():
+            params.requires_grad = True
+        self.net.fc.train()
+        optimizer = torch.optim.Adam(self.net.fc.parameters(), lr=self.lr, weight_decay=1e-6)
+    
+        if self.layers_frozen > -1:
+            for params in self.net.backbone.conv1.parameters():
+                params.requires_grad = False
+            for params in self.net.backbone.bn1.parameters():
+                params.requires_grad = False
+            for params in self.net.backbone.relu.parameters():
+                params.requires_grad = False
+            for params in self.net.backbone.maxpool.parameters():
+                params.requires_grad = False
+        else:
+            optimizer.add_param_group({'params': self.net.backbone.conv1.parameters()})
+            optimizer.add_param_group({'params': self.net.backbone.bn1.parameters()})
+            optimizer.add_param_group({'params': self.net.backbone.relu.parameters()})
+            optimizer.add_param_group({'params': self.net.backbone.maxpool.parameters()})
+        layer_mode = False if self.layers_frozen > -1 else True
+        self.net.backbone.conv1.train(mode=layer_mode)
+        self.net.backbone.bn1.train(mode=layer_mode)
+        self.net.backbone.relu.train(mode=layer_mode)
+        self.net.backbone.maxpool.train(mode=layer_mode)
+    
+        if self.layers_frozen > 0:
+            for params in self.net.backbone.layer1.parameters():
+                params.requires_grad = False
+        else:
+            optimizer.add_param_group({'params': self.net.backbone.layer1.parameters()})
+        layer_mode = False if self.layers_frozen > 0 else True
+        self.net.backbone.layer1.train(mode=layer_mode)
+    
+        if self.layers_frozen > 1:
+            for params in self.net.backbone.layer2.parameters():
+                params.requires_grad = False
+        else:
+            optimizer.add_param_group({'params': self.net.backbone.layer2.parameters()})
+        layer_mode = False if self.layers_frozen > 1 else True
+        self.net.backbone.layer2.train(mode=layer_mode)
+    
+        if self.layers_frozen > 2:
+            for params in self.net.backbone.layer3.parameters():
+                params.requires_grad = False
+        else:
+            optimizer.add_param_group({'params': self.net.backbone.layer3.parameters()})
+        layer_mode = False if self.layers_frozen > 2 else True
+        self.net.backbone.layer3.train(mode=layer_mode)
+    
+        if self.layers_frozen > 3:
+            for params in self.net.backbone.layer4.parameters():
+                params.requires_grad = False
+            for params in self.net.backbone.avgpool.parameters():
+                params.requires_grad = False
+        else:
+            optimizer.add_param_group({'params': self.net.backbone.layer4.parameters()})
+            optimizer.add_param_group({'params': self.net.backbone.avgpool.parameters()})
+        layer_mode = False if self.layers_frozen > 3 else True
+        self.net.backbone.layer4.train(mode=layer_mode)
+        self.net.backbone.avgpool.train(mode=layer_mode)
+        total_params_backbone = sum(p.numel() for p in self.net.backbone.parameters())
+        train_params_backbone = sum(p.numel() for p in self.net.backbone.parameters() if p.requires_grad)
+    
+        total_params_fc = sum(p.numel() for p in self.net.fc.parameters())
+        train_params_fc = sum(p.numel() for p in self.net.fc.parameters() if p.requires_grad)
+        print("{}/{} parameters in backbone are trainable.".format(train_params_backbone, total_params_backbone))
+        print("{}/{} parameters in projection layer are trainable.".format(train_params_fc, total_params_fc))
+    
+        self.net.cuda()
+    
+        return optimizer
+        
     def train(self):
         """
         Train the network using the SimCLR algorithm
         """
         if self.save:
             tb_writer = tb.SummaryWriter(log_dir="../out/temp/")
-        for params in self.net.backbone.parameters():
-            params.requires_grad = True
-        for params in self.net.fc.parameters():
-            params.requires_grad = True
-        self.net.backbone.train()
-        self.net.fc.train()
-        self.net.cuda()
-        optimizer = torch.optim.Adam(self.net.backbone.parameters(), lr=self.lr, weight_decay=1e-6)
-        optimizer.add_param_group({'params': self.net.fc.parameters()})
+        optimizer = self.prepare_network_for_training()
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
                                                                   T_max=self.num_epochs * len(self.train_loader),
                                                                   eta_min=1e-6)
+        if self.num_epochs == 0:
+            return
         total_batches = 0
         for ep in range(1, self.num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.train_loader)
@@ -154,6 +235,8 @@ def get_parser():
     parser.add_argument("--lr", "-lr", type=float, default=1e-1)
     parser.add_argument("--batch_size", "-b", type=int, default=64)
     parser.add_argument("--fraction", "-f", type=float, default=0.1)
+    parser.add_argument("--backbone_file", "-bf", type=str, default="")
+    parser.add_argument("--layers_frozen", "-lf", type=int, default=-1)
     return parser.parse_args()
 
     
