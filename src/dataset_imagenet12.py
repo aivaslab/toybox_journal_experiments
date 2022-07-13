@@ -9,18 +9,28 @@ class DataLoaderGeneric(torch.utils.data.Dataset):
 	"""
 	This class
 	"""
-	def __init__(self, root, train=True, transform=None, fraction=1.0):
+	def __init__(self, root, train=True, transform=None, fraction=1.0, hypertune=True):
 		self.train = train
 		self.transform = transform
 		self.root = root
 		self.fraction = fraction
+		self.hypertune = hypertune
 		
 		if self.train:
-			self.images_file = self.root + "train.pickle"
-			self.labels_file = self.root + "train.csv"
+			if self.hypertune:
+				self.images_file = self.root + "dev.pickle"
+				self.labels_file = self.root + "dev.csv"
+			else:
+				self.images_file = self.root + "train.pickle"
+				self.labels_file = self.root + "train.csv"
 		else:
-			self.images_file = self.root + "test.pickle"
-			self.labels_file = self.root + "test.csv"
+			if self.hypertune:
+				self.images_file = self.root + "val.pickle"
+				self.labels_file = self.root + "val.csv"
+			else:
+				self.images_file = self.root + "test.pickle"
+				self.labels_file = self.root + "test.csv"
+
 		self.images = pickle.load(open(self.images_file, "rb"))
 		self.labels = list(csv.DictReader(open(self.labels_file, "r")))
 		if self.train:
@@ -48,3 +58,8 @@ class DataLoaderGeneric(torch.utils.data.Dataset):
 		if self.transform is not None:
 			im = self.transform(im)
 		return index, im, label
+	
+	
+if __name__ == "__main__":
+	data = DataLoaderGeneric(root="../data_12/IN-12/", train=True, hypertune=False)
+	print(len(data))
