@@ -5,6 +5,7 @@ import torchvision.models as models
 import torch.nn as nn
 import torch
 import torchvision.transforms as transforms
+import numpy as np
 
 import dataset_imagenet12
 
@@ -18,10 +19,10 @@ class KNN:
     This class implements KNN classifier for given training data and test data.
     Can be subclassed for ZSL and FSL
     """
-    def __init__(self, train_data, model_path):
+    def __init__(self, train_data, model_path, k=1):
         self.train_data = train_data
         self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=64, num_workers=4, shuffle=False)
-        
+        self.k = k
         self.model_path = model_path
         self.backbone = models.resnet18(pretrained=False)
         self.fc_size = self.backbone.fc.in_features
@@ -87,27 +88,23 @@ class KNN:
         """
         Calculate the test predictions from the test activations and train activations
         """
-        print(self.train_activations.shape)
-        print(self.test_activations.shape)
         distance = torch.cdist(self.test_activations, self.train_activations)
-        print(distance.shape)
-        min_dist, min_indices = torch.topk(distance, k=1, dim=1, largest=False)
-        print(min_dist.shape, min_indices.shape)
-        self.test_predictions = torch.ones(len(self.test_data))
-        for i in range(len(self.test_data)):
-            self.test_predictions[i] = self.train_labels[min_indices[i]]
+        min_dist, min_indices = torch.topk(distance, k=self.k, dim=1, largest=False)
+        nearest_neighbors = self.train_labels[min_indices]
+        self.test_predictions = torch.mode(nearest_neighbors, dim=1).values.numpy()
+    
         correct = sum([1 for i in range(len(self.test_data)) if self.test_predictions[i] == self.test_labels[i]])
         accuracy = correct / len(self.test_data) * 100.0
-        print(accuracy)
+        print("Accuracy is {}".format(accuracy))
 
 
 if __name__ == "__main__":
     transform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
                                     transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
-    tr_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform, fraction=0.01)
+    tr_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform, fraction=1.0)
     backbone_path = "../out/in12_baseline/backbone_trainer_resnet18_backbone.pt"
-    knn = KNN(train_data=tr_data, model_path=backbone_path)
-    te_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform, fraction=0.2)
+    knn = KNN(train_data=tr_data, model_path=backbone_path, k=15)
+    te_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform, fraction=0.2)
     knn.get_test_activations(test_data=te_data)
     knn.get_test_predictions()
     
