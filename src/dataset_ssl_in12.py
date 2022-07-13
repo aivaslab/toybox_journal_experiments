@@ -11,11 +11,15 @@ class DatasetIN12(torch.utils.data.Dataset):
     """
     This class can be used to load IN-12 data in PyTorch for SimCLR/BYOL-like methods
     """
-    def __init__(self, fraction=0.1, transform=None):
+    def __init__(self, fraction=0.1, transform=None, hypertune=True):
         self.fraction = fraction
         self.transform = transform
+        self.hypertune = hypertune
         super().__init__()
-        self.train_images_file_name = "../data_12/IN-12/train.pickle"
+        if self.hypertune:
+            self.train_images_file_name = "../data_12/IN-12/dev.pickle"
+        else:
+            self.train_images_file_name = "../data_12/IN-12/train.pickle"
         
         with open(self.train_images_file_name, "rb") as train_images_file:
             self.train_images = pickle.load(train_images_file)
