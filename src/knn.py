@@ -5,6 +5,7 @@ import torchvision.models as models
 import torch.nn as nn
 import torch
 import torchvision.transforms as transforms
+import torch.nn.functional as functional
 import numpy as np
 
 import dataset_imagenet12
@@ -19,7 +20,8 @@ class KNN:
     This class implements KNN classifier for given training data and test data.
     Can be subclassed for ZSL and FSL
     """
-    def __init__(self, train_data, model_path, k=1):
+    def __init__(self, train_data, model_path, cosine=False, k=1):
+        self.cosine = cosine
         self.train_data = train_data
         self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=64, num_workers=4, shuffle=False)
         self.k = k
@@ -29,8 +31,11 @@ class KNN:
         self.backbone.fc = nn.Identity()
         print("Loading weights from {}".format(self.model_path))
         self.backbone.load_state_dict(torch.load(self.model_path))
+        self.backbone.cuda()
+        self.backbone.eval()
 
         self.train_activations = None
+        self.mean_activations_train = None
         self.train_labels = None
         self.test_data = None
         self.test_loader = None
@@ -47,21 +52,21 @@ class KNN:
         len_train_data = len(self.train_data)
         self.train_activations = torch.zeros(len_train_data, self.fc_size)
         self.train_labels = torch.zeros(len_train_data, dtype=torch.float32)
-        
-        self.backbone.cuda()
+        self.mean_activations_train = torch.zeros(12, self.fc_size)
+    
         for idx, images, labels in self.train_loader:
             images = images.cuda()
             with torch.no_grad():
                 feats = self.backbone.forward(images)
                 feats = feats.cpu()
-            # print(feats.shape, idx.shape, labels.shape)
             self.train_labels[idx] = labels.float()
             self.train_activations[idx] = feats
-            for i in range(len(idx)):
-                assert self.train_labels[idx[i]] == labels[i]
-                for j in range(self.fc_size):
-                    assert self.train_activations[idx[i]][j] == feats[i][j]
-                    
+        for cl in range(12):
+            indices_cl = torch.nonzero(self.train_labels == cl)
+            activations_cl = torch.squeeze(self.train_activations[indices_cl])
+            mean_act = torch.mean(activations_cl, dim=0, keepdim=False)
+            self.mean_activations_train[cl] = mean_act
+        
     def get_test_activations(self, test_data):
         """
         Compute the test activations from the model
@@ -71,7 +76,6 @@ class KNN:
         
         self.test_activations = torch.zeros(len(self.test_data), self.fc_size)
         self.test_labels = torch.zeros(len(self.test_data), dtype=torch.float32)
-        self.backbone.cuda()
         for idx, images, labels in self.test_loader:
             images = images.cuda()
             with torch.no_grad():
@@ -79,31 +83,37 @@ class KNN:
                 feats = feats.cpu()
             self.test_labels[idx] = labels.float()
             self.test_activations[idx] = feats
-            for i in range(len(idx)):
-                assert self.test_labels[idx[i]] == labels[i]
-                for j in range(self.fc_size):
-                    assert self.test_activations[idx[i]][j] == feats[i][j]
                 
     def get_test_predictions(self):
         """
         Calculate the test predictions from the test activations and train activations
         """
-        distance = torch.cdist(self.test_activations, self.train_activations)
-        min_dist, min_indices = torch.topk(distance, k=self.k, dim=1, largest=False)
-        nearest_neighbors = self.train_labels[min_indices]
-        self.test_predictions = torch.mode(nearest_neighbors, dim=1).values.numpy()
+        self.test_activations = functional.normalize(self.test_activations)
+        self.train_activations = functional.normalize(self.train_activations)
+        self.mean_activations_train = functional.normalize(self.mean_activations_train)
+        
+        if self.cosine:
+            distance = torch.matmul(self.test_activations, self.mean_activations_train.T)
+            min_dist, min_indices = torch.topk(distance, k=1, dim=1, largest=True)
+        else:
+            distance = torch.cdist(self.test_activations, self.mean_activations_train)
+            min_dist, min_indices = torch.topk(distance, k=1, dim=1, largest=False)
+        
+        # nearest_neighbors = self.train_labels[min_indices]
+        self.test_predictions = min_indices  # torch.mode(nearest_neighbors, dim=1).values.numpy()
     
         correct = sum([1 for i in range(len(self.test_data)) if self.test_predictions[i] == self.test_labels[i]])
         accuracy = correct / len(self.test_data) * 100.0
         print("Accuracy is {}".format(accuracy))
+        return accuracy
 
 
 if __name__ == "__main__":
     transform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
                                     transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
     tr_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform, fraction=1.0)
-    backbone_path = "../out/in12_baseline/backbone_trainer_resnet18_backbone.pt"
-    knn = KNN(train_data=tr_data, model_path=backbone_path, k=15)
+    backbone_path = "../out/toybox_baseline/backbone_trainer_resnet18_backbone.pt"
+    knn = KNN(train_data=tr_data, model_path=backbone_path, k=19, cosine=False)
     te_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform, fraction=0.2)
     knn.get_test_activations(test_data=te_data)
     knn.get_test_predictions()
