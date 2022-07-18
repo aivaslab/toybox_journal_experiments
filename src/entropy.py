@@ -76,7 +76,7 @@ class EntModel:
         for ep in range(num_epochs):
             num_batches = 0
             total_loss = 0
-            tqdm_bar = tqdm.tqdm(data_loader)
+            tqdm_bar = tqdm.tqdm(data_loader, ncols=175)
             for idx, images, labels in tqdm_bar:
                 images, labels = images.cuda(), labels.cuda()
                 optimizer.zero_grad()
@@ -98,11 +98,10 @@ class EntModel:
                 num_batches += 1
                 total_loss += loss.item()
                 total_batches += 1
-                tqdm_bar.set_description("Epoch: {}/{}  LR: {:.4f}  CE Loss: {:.4f} Train Entropy: {:.4f},  "
-                                         "Total Loss: {:.4f}  Test Entropy: {:.6f}".
+                tqdm_bar.set_description("Epoch: {}/{}  LR: {:.4f}  CE Loss: {:.4f}  Tr. Ent: {:.4f}  "
+                                         "Total Loss: {:.4f}".
                                          format(ep+1, num_epochs, optimizer.param_groups[0]['lr'],
-                                                total_loss/num_batches, train_entropy.item(), combined_loss.item(),
-                                                entropy))
+                                                total_loss/num_batches, train_entropy.item(), combined_loss.item()))
             
                 combined_loss.backward()
                 optimizer.step()
@@ -112,7 +111,7 @@ class EntModel:
                 tb_writer.add_scalar(tag='Entropy', scalar_value=entropy, global_step=total_batches)
                 tb_writer.add_scalar(tag='Loss/Toybox_Train', scalar_value=total_loss/num_batches,
                                      global_step=total_batches)
-        
+
             entropy = self.run_dataset(eval_data)
             tb_writer.add_scalar(tag='Entropy', scalar_value=entropy, global_step=total_batches)
             print("Average Entropy: {}".format(entropy))
@@ -120,6 +119,9 @@ class EntModel:
             test_loss = self.get_loss(eval_data)
             tb_writer.add_scalar(tag='Loss/IN12_Test', scalar_value=test_loss, global_step=total_batches)
             print("Test Loss: {}".format(test_loss))
+
+            if (ep + 1) % 5 == 0:
+                optimizer.param_groups[0]['lr'] *= 0.8
         
             self.get_acc(eval_data)
         
@@ -210,7 +212,7 @@ def get_parser():
     Create parser and return arguments for experiment
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lambda", "-l", default=1, type=int)
+    parser.add_argument("--lambda", "-l", default=1, type=float)
     parser.add_argument("--epochs", "-e", default=10, type=int)
     parser.add_argument("--backbone", "-bb", default=False, action='store_true')
     parser.add_argument("--lr", "-lr", default=0.1, type=float)
@@ -228,10 +230,12 @@ if __name__ == "__main__":
 
     in12_train_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform_in12)
     
-    transform_toybox = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+    transform_toybox = transforms.Compose([transforms.Resize(256), transforms.RandomResizedCrop(size=224),
+                                           transforms.RandomHorizontalFlip(p=0.5),
+                                           transforms.ToPILImage(), transforms.ToTensor(),
                                            transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)])
     toybox_train_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(), train=True,
-                                                     num_instances=10, num_images_per_class=2000,
+                                                     num_instances=20, num_images_per_class=3000,
                                                      transform=transform_toybox)
     model.train_model(data=toybox_train_data, eval_data=in12_test_data, ent_train_data=in12_train_data)
     
