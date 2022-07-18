@@ -66,24 +66,32 @@ class EntModel:
                 params.requires_grad = True
             optimizer.add_param_group({'params': self.backbone.parameters()})
             
-        num_epochs = self.args['epochs']
-        entropy = self.run_dataset(eval_data)
         self.fc.train()
         if self.args['backbone']:
             self.backbone.train()
+        
+        entropy = self.run_dataset(eval_data)
+        tb_writer.add_scalar(tag='IN12 Test Entropy', scalar_value=entropy, global_step=0)
+        test_loss = self.get_loss(eval_data)
+        tb_writer.add_scalar(tag='IN12 Test Loss', scalar_value=test_loss, global_step=0)
+
         total_batches = 0
-        # tb_writer.add_scalar(tag='Entropy', scalar_value=entropy, global_step=total_batches)
+        num_epochs = self.args['epochs']
+        
         for ep in range(num_epochs):
             num_batches = 0
             total_loss = 0
-            tqdm_bar = tqdm.tqdm(data_loader, ncols=175)
+            tqdm_bar = tqdm.tqdm(data_loader, ncols=150)
             for idx, images, labels in tqdm_bar:
                 images, labels = images.cuda(), labels.cuda()
                 optimizer.zero_grad()
                 feats = self.backbone.forward(images)
+                with torch.no_grad():
+                    feat_norm = torch.mean(torch.linalg.vector_norm(feats, dim=1))
                 logits = self.fc.forward(feats)
+                # print(logits)
                 loss = nn.CrossEntropyLoss()(logits, labels)
-            
+                
                 try:
                     _, images_ent, _ = next(ent_loader_iter)
                 except StopIteration:
@@ -92,6 +100,8 @@ class EntModel:
             
                 images_ent = images_ent.cuda()
                 feats_ent = self.backbone.forward(images_ent)
+                with torch.no_grad():
+                    feat_ent_norm = torch.mean(torch.linalg.vector_norm(feats_ent, dim=1))
                 activations_ent = self.fc.forward(feats_ent)
                 train_entropy = torch.mean(self.calc_entropy(activations_ent))
                 combined_loss = loss + self.args['lambda'] * train_entropy
@@ -99,31 +109,30 @@ class EntModel:
                 total_loss += loss.item()
                 total_batches += 1
                 tqdm_bar.set_description("Epoch: {}/{}  LR: {:.4f}  CE Loss: {:.4f}  Tr. Ent: {:.4f}  "
-                                         "Total Loss: {:.4f}".
+                                         "Total Loss: {:.4f}  TB Norm: {:.2f}  IN12 Norm: {:.2f}".
                                          format(ep+1, num_epochs, optimizer.param_groups[0]['lr'],
-                                                total_loss/num_batches, train_entropy.item(), combined_loss.item()))
+                                                loss.item(), train_entropy.item(), combined_loss.item(),
+                                                feat_norm, feat_ent_norm))
             
                 combined_loss.backward()
                 optimizer.step()
-                # if (num_batches+1) % 20 == 0:
-                #     entropy = self.run_dataset(eval_data)
-                #     self.fc.train()
-                tb_writer.add_scalar(tag='Entropy', scalar_value=entropy, global_step=total_batches)
-                tb_writer.add_scalar(tag='Loss/Toybox_Train', scalar_value=total_loss/num_batches,
-                                     global_step=total_batches)
+                
+                tb_writer.add_scalar(tag='Loss/IN12_Entropy', scalar_value=train_entropy, global_step=total_batches)
+                tb_writer.add_scalar(tag='Loss/TB_CrossEnt', scalar_value=loss.item(), global_step=total_batches)
+                tb_writer.add_scalar(tag='Loss/Total', scalar_value=combined_loss.item(), global_step=total_batches)
+                tb_writer.add_scalar(tag='Norm/Toybox', scalar_value=feat_norm, global_step=total_batches)
+                tb_writer.add_scalar(tag='Norm/IN12', scalar_value=feat_ent_norm, global_step=total_batches)
 
             entropy = self.run_dataset(eval_data)
-            tb_writer.add_scalar(tag='Entropy', scalar_value=entropy, global_step=total_batches)
+            tb_writer.add_scalar(tag='IN12 Test Entropy', scalar_value=entropy, global_step=total_batches)
             print("Average Entropy: {}".format(entropy))
         
             test_loss = self.get_loss(eval_data)
-            tb_writer.add_scalar(tag='Loss/IN12_Test', scalar_value=test_loss, global_step=total_batches)
+            tb_writer.add_scalar(tag='IN12 Test Loss', scalar_value=test_loss, global_step=total_batches)
             print("Test Loss: {}".format(test_loss))
 
             if (ep + 1) % 5 == 0:
                 optimizer.param_groups[0]['lr'] *= 0.8
-        
-            self.get_acc(eval_data)
         
             self.fc.train()
             if self.args['backbone']:
@@ -182,7 +191,7 @@ class EntModel:
     
         return total_loss / batches
 
-    def get_acc(self, data):
+    def get_acc(self, data, name=""):
         """
         Pass dataset through network and calculate accuracy
         """
@@ -202,7 +211,7 @@ class EntModel:
                 top1acc += top[0].item() * pred.shape[0]
                 tot_train_points += pred.shape[0]
         top1acc /= tot_train_points
-        print("Accuracy on test set: {}".format(top1acc))
+        print("Accuracy on {} test set: {}".format(name, top1acc))
     
         return top1acc
                 
@@ -224,18 +233,31 @@ def get_parser():
 if __name__ == "__main__":
     args = vars(get_parser())
     model = EntModel(model_path="../out/toybox_baseline/", exp_args=args)
-    transform_in12 = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+    transform_in12 = transforms.Compose([transforms.ToPILImage(),
+                                         transforms.Resize(256),
+                                         transforms.RandomResizedCrop(224),
+                                         transforms.RandomHorizontalFlip(p=0.2),
+                                         # transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8, hue=0.2),
+                                         transforms.ToTensor(),
                                          transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
     in12_test_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform_in12)
 
-    in12_train_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform_in12)
+    in12_train_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform_in12,
+                                                           fraction=0.2)
     
-    transform_toybox = transforms.Compose([transforms.Resize(256), transforms.RandomResizedCrop(size=224),
+    transform_toybox = transforms.Compose([transforms.ToPILImage(), transforms.Resize(256),
+                                           transforms.RandomResizedCrop(size=224),
                                            transforms.RandomHorizontalFlip(p=0.5),
-                                           transforms.ToPILImage(), transforms.ToTensor(),
+                                           transforms.ToTensor(),
                                            transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)])
-    toybox_train_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(), train=True,
-                                                     num_instances=20, num_images_per_class=3000,
+    
+    toybox_train_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(0), train=True,
+                                                     num_instances=20, num_images_per_class=100,
                                                      transform=transform_toybox)
     model.train_model(data=toybox_train_data, eval_data=in12_test_data, ent_train_data=in12_train_data)
+
+    toybox_test_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(0), train=False,
+                                                    transform=transform_toybox)
+    model.get_acc(data=in12_test_data, name="in12")
+    model.get_acc(data=toybox_test_data, name="toybox")
     
