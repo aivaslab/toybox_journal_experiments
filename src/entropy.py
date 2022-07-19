@@ -255,7 +255,11 @@ if __name__ == "__main__":
                                          transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8, hue=0.2),
                                          transforms.ToTensor(),
                                          transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
-    in12_test_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform_in12)
+    transform_in12_test = transforms.Compose([transforms.ToPILImage(),
+                                              transforms.ToTensor(),
+                                              transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
+    in12_test_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False,
+                                                          transform=transform_in12_test)
 
     in12_train_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform_in12,
                                                            fraction=0.2)
