@@ -55,7 +55,9 @@ class EntModel:
         Train loaded model with data provided
         """
         log_dir = "../runs/" + self.args['log_dir']
-
+        assert not os.path.isdir(log_dir), "Directory {} exists...".format(log_dir)
+        model_out_dir = "../out/" + self.args['log_dir']
+        os.makedirs(model_out_dir, exist_ok=False)
         tb_writer = tb.SummaryWriter(log_dir=log_dir)
         data_loader = torchdata.DataLoader(data, batch_size=self.args['batch_size'], num_workers=4, shuffle=True,
                                            pin_memory=True, persistent_workers=True)
@@ -85,7 +87,7 @@ class EntModel:
         for ep in range(num_epochs):
             num_batches = 0
             total_loss = 0
-            tqdm_bar = tqdm.tqdm(data_loader, ncols=200)
+            tqdm_bar = tqdm.tqdm(data_loader, ncols=155)
             for idx, images, labels in tqdm_bar:
                 images, labels = images.cuda(), labels.cuda()
                 optimizer.zero_grad()
@@ -96,24 +98,29 @@ class EntModel:
                 # print(logits)
                 loss = nn.CrossEntropyLoss()(logits, labels)
                 
-                try:
-                    _, images_ent, _ = next(ent_loader_iter)
-                except StopIteration:
-                    ent_loader_iter = iter(ent_data_loader)
-                    _, images_ent, _ = next(ent_loader_iter)
-            
-                images_ent = images_ent.cuda()
-                feats_ent = self.backbone.forward(images_ent)
-                with torch.no_grad():
-                    feat_ent_norm = torch.mean(torch.linalg.vector_norm(feats_ent, dim=1))
-                activations_ent = self.fc.forward(feats_ent)
-                train_entropy = torch.mean(self.calc_entropy(activations_ent))
-                combined_loss = loss + self.args['lambda'] * train_entropy
+                if self.args['lambda'] > 0:
+                    try:
+                        _, images_ent, _ = next(ent_loader_iter)
+                    except StopIteration:
+                        ent_loader_iter = iter(ent_data_loader)
+                        _, images_ent, _ = next(ent_loader_iter)
+                
+                    images_ent = images_ent.cuda()
+                    feats_ent = self.backbone.forward(images_ent)
+                    with torch.no_grad():
+                        feat_ent_norm = torch.mean(torch.linalg.vector_norm(feats_ent, dim=1))
+                    activations_ent = self.fc.forward(feats_ent)
+                    train_entropy = torch.mean(self.calc_entropy(activations_ent))
+                    combined_loss = loss + self.args['lambda'] * train_entropy
+                else:
+                    combined_loss = loss
+                    train_entropy = torch.Tensor([0.0])
+                    feat_ent_norm = 0.0
                 num_batches += 1
                 total_loss += loss.item()
                 total_batches += 1
-                tqdm_bar.set_description("Epoch: {}/{}  LR: {:.4f}  CE Loss: {:.4f}  Tr. Ent: {:.4f}  "
-                                         "Total Loss: {:.4f}  TB Norm: {:.2f}  IN12 Norm: {:.2f}".
+                tqdm_bar.set_description("Epoch: {}/{}  LR: {:.4f}  CE Loss: {:.3f}  Tr. Ent: {:.3f}  "
+                                         "Total: {:.3f}  TB Norm: {:.2f}  IN12 Norm: {:.2f}".
                                          format(ep+1, num_epochs, optimizer.param_groups[0]['lr'],
                                                 loss.item(), train_entropy.item(), combined_loss.item(),
                                                 feat_norm, feat_ent_norm))
@@ -142,6 +149,8 @@ class EntModel:
             if self.args['backbone']:
                 self.backbone.train()
         tb_writer.close()
+        torch.save(self.backbone.state_dict(), model_out_dir + "/backbone.pt")
+        torch.save(self.fc.state_dict(), model_out_dir + "/classifier.pt")
             
     def calc_entropy(self, activations):
         """
@@ -258,7 +267,7 @@ if __name__ == "__main__":
                                            transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)])
     
     toybox_train_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(0), train=True,
-                                                     num_instances=20, num_images_per_class=2000,
+                                                     num_instances=20, num_images_per_class=200,
                                                      transform=transform_toybox)
     model.train_model(data=toybox_train_data, eval_data=in12_test_data, ent_train_data=in12_train_data)
 
