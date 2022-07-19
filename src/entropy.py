@@ -1,6 +1,8 @@
 """
 Module that implements method that learns from entropy on target distribution
 """
+import os
+
 import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
@@ -52,7 +54,9 @@ class EntModel:
         """
         Train loaded model with data provided
         """
-        tb_writer = tb.SummaryWriter(log_dir="../runs/entmod/")
+        log_dir = "../runs/" + self.args['log_dir']
+
+        tb_writer = tb.SummaryWriter(log_dir=log_dir)
         data_loader = torchdata.DataLoader(data, batch_size=self.args['batch_size'], num_workers=4, shuffle=True,
                                            pin_memory=True, persistent_workers=True)
         ent_data_loader = torchdata.DataLoader(ent_train_data, batch_size=self.args['batch_size'], num_workers=4,
@@ -81,7 +85,7 @@ class EntModel:
         for ep in range(num_epochs):
             num_batches = 0
             total_loss = 0
-            tqdm_bar = tqdm.tqdm(data_loader, ncols=150)
+            tqdm_bar = tqdm.tqdm(data_loader, ncols=200)
             for idx, images, labels in tqdm_bar:
                 images, labels = images.cuda(), labels.cuda()
                 optimizer.zero_grad()
@@ -131,7 +135,7 @@ class EntModel:
             tb_writer.add_scalar(tag='IN12 Test Loss', scalar_value=test_loss, global_step=total_batches)
             print("Test Loss: {}".format(test_loss))
 
-            if (ep + 1) % 5 == 0:
+            if (ep + 1) % 10 == 0:
                 optimizer.param_groups[0]['lr'] *= 0.8
         
             self.fc.train()
@@ -226,6 +230,8 @@ def get_parser():
     parser.add_argument("--backbone", "-bb", default=False, action='store_true')
     parser.add_argument("--lr", "-lr", default=0.1, type=float)
     parser.add_argument("--batch-size", "-b", default=64, type=int)
+    parser.add_argument("--log-dir", "-d", type=str, required=True, help="Input name of dir where tb_writer"
+                                                                         "output will be stored using -d flag")
     
     return parser.parse_args()
     
@@ -237,7 +243,7 @@ if __name__ == "__main__":
                                          transforms.Resize(256),
                                          transforms.RandomResizedCrop(224),
                                          transforms.RandomHorizontalFlip(p=0.2),
-                                         # transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8, hue=0.2),
+                                         transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8, hue=0.2),
                                          transforms.ToTensor(),
                                          transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
     in12_test_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform_in12)
@@ -252,7 +258,7 @@ if __name__ == "__main__":
                                            transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)])
     
     toybox_train_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(0), train=True,
-                                                     num_instances=20, num_images_per_class=100,
+                                                     num_instances=20, num_images_per_class=2000,
                                                      transform=transform_toybox)
     model.train_model(data=toybox_train_data, eval_data=in12_test_data, ent_train_data=in12_train_data)
 
