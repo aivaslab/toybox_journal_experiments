@@ -10,6 +10,7 @@ import tqdm
 import torch.utils.tensorboard as tb
 import argparse
 import os
+import torch.utils.data as torchdata
 
 import dataset_ssl_in12
 
@@ -54,8 +55,9 @@ class Network(nn.Module):
         if os.path.isfile(self.backbone_file):
             print("Loading weights from:", self.backbone_file)
             self.backbone.load_state_dict(torch.load(self.backbone_file))
-        self.fc = nn.Sequential(nn.Linear(self.fc_size, self.fc_size), nn.ReLU(inplace=True),
-                                nn.Linear(self.fc_size, 128))
+        self.fc = nn.Sequential(nn.Linear(self.fc_size, self.fc_size), nn.BatchNorm1d(num_features=self.fc_size),
+                                nn.ReLU(inplace=True),
+                                nn.Linear(self.fc_size, 128), nn.BatchNorm1d(num_features=128))
     
     def forward(self, x):
         """
@@ -80,24 +82,27 @@ class SimCLR:
         self.fraction = self.args['fraction']
         self.backbone_file_name = self.args['backbone_file']
         self.layers_frozen = self.args['layers_frozen']
+        self.save_dir = self.args['save_dir']
         self.net = Network(backbone_file=self.backbone_file_name)
-        
+
+        color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
+        gaussian_blur = transforms.GaussianBlur(kernel_size=21, sigma=1.0)
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
-            transforms.Resize(270),
-            transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8),
+            transforms.RandomApply([color_jitter], p=0.8),
             transforms.RandomGrayscale(p=0.2),
-            transforms.GaussianBlur(kernel_size=5),
-            transforms.RandomResizedCrop(size=224, scale=(0.8, 1.2),
+            transforms.RandomApply([gaussian_blur], p=0.5),
+            transforms.Resize(270),
+            transforms.RandomResizedCrop(size=224, scale=(0.2, 1.0),
                                          interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.RandomHorizontalFlip(),
+            transforms.RandomHorizontalFlip(p=0.5),
             transforms.ToTensor(),
             transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
         ])
         
         self.train_data = dataset_ssl_in12.DatasetIN12(fraction=self.fraction, transform=self.train_transform)
-        self.train_loader = torch.utils.data.DataLoader(self.train_data, batch_size=self.b_size, shuffle=True,
-                                                        num_workers=8)
+        self.train_loader = torchdata.DataLoader(self.train_data, batch_size=self.b_size, shuffle=True,
+                                                 num_workers=6)
         
     def prepare_network_for_training(self):
         """
@@ -182,7 +187,7 @@ class SimCLR:
         Train the network using the SimCLR algorithm
         """
         if self.save:
-            tb_writer = tb.SummaryWriter(log_dir="../out/temp/")
+            tb_writer = tb.SummaryWriter(log_dir="../runs/" + self.save_dir + "/")
         optimizer = self.prepare_network_for_training()
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
                                                                   T_max=self.num_epochs * len(self.train_loader),
@@ -220,9 +225,11 @@ class SimCLR:
         import os
         if not os.path.isdir("../out/temp/"):
             os.mkdir("../out/temp/")
-        torch.save(self.net.backbone.state_dict(), "../out/temp/ssl_resnet18_backbone.pt")
+        torch.save(self.net.backbone.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_backbone.pt")
         dummy_classifier = nn.Linear(512, 12)
-        torch.save(dummy_classifier.state_dict(), "../out/temp/ssl_resnet18_classifier.pt")
+        torch.save(dummy_classifier.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_classifier.pt")
+        if self.save:
+            tb_writer.close()
 
 
 def get_parser():
@@ -237,6 +244,7 @@ def get_parser():
     parser.add_argument("--fraction", "-f", type=float, default=0.1)
     parser.add_argument("--backbone_file", "-bf", type=str, default="")
     parser.add_argument("--layers_frozen", "-lf", type=int, default=-1)
+    parser.add_argument("--save_dir", "-sd", default="temp", type=str)
     return parser.parse_args()
 
     

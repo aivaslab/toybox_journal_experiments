@@ -45,24 +45,28 @@ class DatasetIN12(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     import torchvision.transforms as transforms
-
+    color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
+    gaussian_blur = transforms.GaussianBlur(kernel_size=21, sigma=1.0)
     train_transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8),
+        transforms.RandomApply([color_jitter], p=0.8),
         transforms.RandomGrayscale(p=0.2),
-        transforms.GaussianBlur(kernel_size=5),
+        transforms.RandomApply([gaussian_blur], p=0.5),
         transforms.Resize(256),
-        transforms.RandomResizedCrop(size=224, scale=(0.8, 1.2),
+        transforms.RandomResizedCrop(size=224, scale=(0.3, 1.0),
                                      interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         # transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
     ])
     train_data = DatasetIN12(fraction=0.1, transform=train_transform)
-    print(len(train_data))
-    for i in range(5):
-        idx, images = train_data[i]
-        im = transforms.ToPILImage()(images[0])
-        im.show()
-        im2 = transforms.ToPILImage()(images[1])
-        im2.show()
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
+    idx, images = next(iter(train_loader))
+    print(len(idx))
+    images = torch.cat(images, dim=0)
+    print(images.shape)
+    img1 = transforms.ToPILImage()(images[0])
+    img1.show()
+    img2 = transforms.ToPILImage()(images[64])
+    img2.show()
+    
