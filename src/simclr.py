@@ -89,14 +89,14 @@ class SimCLR:
         self.net = Network(backbone_file=self.backbone_file_name)
 
         color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
-        gaussian_blur = transforms.GaussianBlur(kernel_size=3, sigma=1.0)
+        gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=1.0)
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.RandomApply([color_jitter], p=0.8),
             transforms.RandomGrayscale(p=0.2),
             transforms.RandomApply([gaussian_blur], p=0.5),
             transforms.Resize(270),
-            transforms.RandomResizedCrop(size=224, scale=(0.2, 1.0),
+            transforms.RandomResizedCrop(size=224, scale=(0.08, 1.0),
                                          interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ToTensor(),
@@ -226,8 +226,8 @@ class SimCLR:
                 lr_scheduler.step()
             tqdm_bar.close()
         import os
-        if not os.path.isdir("../out/temp/"):
-            os.mkdir("../out/temp/")
+        if not os.path.isdir("../out/" + self.save_dir):
+            os.mkdir("../out/" + self.save_dir)
         torch.save(self.net.backbone.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_backbone.pt")
         dummy_classifier = nn.Linear(512, 12)
         torch.save(dummy_classifier.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_classifier.pt")
