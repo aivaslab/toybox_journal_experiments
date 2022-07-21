@@ -56,8 +56,8 @@ class UMapFromModel:
         self.backbone.cuda()
         self.backbone.eval()
         self.reducer = umap.UMAP(
-            n_neighbors=15,
-            min_dist=0.15,
+            n_neighbors=10,
+            min_dist=0.1,
             n_components=2,
             metric='cosine'
         )
@@ -125,6 +125,13 @@ class UMapFromModel:
         plt.show()
 
 
+def get_umap_two_datasets(model_path, data_1, data_2):
+    """
+    This method can be used to get the UMAPS for two datasets.
+    The UMAP transform will be learned based on data_1 and data_2 will be treated
+    as test data.
+    """
+
 if __name__ == "__main__":
     transform_in12 = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
                                          transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
@@ -141,7 +148,7 @@ if __name__ == "__main__":
     toybox_test_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(0), train=False,
                                                     transform=transform_toybox)
 
-    model = UMapFromModel(model_path="../out/temp_trial/ssl_resnet18_backbone.pt")
+    model = UMapFromModel(model_path="../out/simclr_trial_2/ssl_resnet18_backbone.pt")
     in12_train_activations, in12_train_labels = model.get_activations(data=in12_train_data)
     in12_test_activations, in12_test_labels = model.get_activations(data=in12_test_data)
     # toybox_train_activations, toybox_train_labels = model.get_activations(data=toybox_train_data)
