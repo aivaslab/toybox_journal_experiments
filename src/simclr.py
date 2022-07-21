@@ -13,7 +13,10 @@ import os
 import torch.utils.data as torchdata
 
 import dataset_ssl_in12
+import dataset_imagenet12
+import knn
 
+IN12_DATA_PATH = "../data_12/IN-12/"
 IN12_MEAN = (0.485, 0.456, 0.406)
 IN12_STD = (0.229, 0.224, 0.225)
 
@@ -86,7 +89,7 @@ class SimCLR:
         self.net = Network(backbone_file=self.backbone_file_name)
 
         color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
-        gaussian_blur = transforms.GaussianBlur(kernel_size=21, sigma=1.0)
+        gaussian_blur = transforms.GaussianBlur(kernel_size=3, sigma=1.0)
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.RandomApply([color_jitter], p=0.8),
@@ -230,6 +233,31 @@ class SimCLR:
         torch.save(dummy_classifier.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_classifier.pt")
         if self.save:
             tb_writer.close()
+            
+    def get_knn_accuracy(self):
+        """
+        Calculates the knn accuracy on the trained model
+        """
+        torch.save(self.net.backbone.state_dict(), "./temp.pt")
+
+        transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize(270),
+            transforms.RandomResizedCrop(size=224, scale=(0.2, 1.0),
+                                         interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
+        ])
+
+        tr_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=0.05, train=True,
+                                                       transform=transform)
+        te_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform,
+                                                       fraction=0.2)
+        
+        knn_classifier = knn.KNN(model_path="./temp.pt", cosine=True, train_data=tr_data)
+        knn_classifier.get_test_activations(test_data=te_data)
+        knn_classifier.get_test_predictions()
 
 
 def get_parser():
@@ -252,3 +280,5 @@ if __name__ == "__main__":
     args = vars(get_parser())
     exp = SimCLR(exp_args=args)
     exp.train()
+    exp.get_knn_accuracy()
+    

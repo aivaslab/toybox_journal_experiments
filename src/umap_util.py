@@ -14,10 +14,15 @@ import numpy as np
 import torch.utils.data as torchdata
 
 import dataset_imagenet12
+import dataset_toybox
 
+TOYBOX_DATA_PATH = "../data_12/Toybox/"
 IN12_DATA_PATH = "../data_12/IN-12/"
+
 IN12_MEAN = (0.485, 0.456, 0.406)
 IN12_STD = (0.229, 0.224, 0.225)
+TOYBOX_MEAN = (0.3499, 0.4374, 0.5199)
+TOYBOX_STD = (0.1623, 1894, 1775)
 
 color_maps = cm.get_cmap('tab20b')
 COLORS = {
@@ -121,19 +126,30 @@ class UMapFromModel:
 
 
 if __name__ == "__main__":
-    transform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
-                                    transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
-    in12_train_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform,
+    transform_in12 = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+                                         transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)])
+    in12_train_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True, transform=transform_in12,
                                                            fraction=1.0)
+    in12_test_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform_in12)
+    
+    transform_toybox = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+                                           transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)])
 
-    in12_test_data = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False, transform=transform,
-                                                          fraction=0.05)
+    toybox_train_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(0), train=True,
+                                                     num_instances=20, num_images_per_class=2000,
+                                                     transform=transform_toybox)
+    toybox_test_data = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, rng=np.random.default_rng(0), train=False,
+                                                    transform=transform_toybox)
 
-    model = UMapFromModel(model_path="../out/in12_baseline/backbone_trainer_resnet18_backbone.pt")
+    model = UMapFromModel(model_path="../out/temp_trial/ssl_resnet18_backbone.pt")
     in12_train_activations, in12_train_labels = model.get_activations(data=in12_train_data)
     in12_test_activations, in12_test_labels = model.get_activations(data=in12_test_data)
-
+    # toybox_train_activations, toybox_train_labels = model.get_activations(data=toybox_train_data)
+    # print(toybox_train_activations.shape)
+    # toybox_test_activations, toybox_test_labels = model.get_activations(data=toybox_test_data)
+    # print(toybox_test_activations.shape)
     train_embeddings = model.fit_data(in12_train_activations)
     test_embeddings = model.transform_data(in12_test_activations)
+
     model.plot(embeddings=[train_embeddings, test_embeddings], labels=[in12_train_labels, in12_test_labels],
                markers=['.', 'x'])
