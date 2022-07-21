@@ -15,6 +15,7 @@ import torch.utils.data as torchdata
 import dataset_ssl_in12
 import dataset_imagenet12
 import knn
+import utils
 
 IN12_DATA_PATH = "../data_12/IN-12/"
 IN12_MEAN = (0.485, 0.456, 0.406)
@@ -128,6 +129,10 @@ class SimCLR:
             for params in self.net.backbone.maxpool.parameters():
                 params.requires_grad = False
         else:
+            self.net.backbone.conv1.apply(utils.weights_init)
+            self.net.backbone.bn1.apply(utils.weights_init)
+            self.net.backbone.relu.apply(utils.weights_init)
+            self.net.backbone.maxpool.apply(utils.weights_init)
             optimizer.add_param_group({'params': self.net.backbone.conv1.parameters()})
             optimizer.add_param_group({'params': self.net.backbone.bn1.parameters()})
             optimizer.add_param_group({'params': self.net.backbone.relu.parameters()})
@@ -142,6 +147,7 @@ class SimCLR:
             for params in self.net.backbone.layer1.parameters():
                 params.requires_grad = False
         else:
+            self.net.backbone.layer1.apply(utils.weights_init)
             optimizer.add_param_group({'params': self.net.backbone.layer1.parameters()})
         layer_mode = False if self.layers_frozen > 0 else True
         self.net.backbone.layer1.train(mode=layer_mode)
@@ -150,6 +156,7 @@ class SimCLR:
             for params in self.net.backbone.layer2.parameters():
                 params.requires_grad = False
         else:
+            self.net.backbone.layer2.apply(utils.weights_init)
             optimizer.add_param_group({'params': self.net.backbone.layer2.parameters()})
         layer_mode = False if self.layers_frozen > 1 else True
         self.net.backbone.layer2.train(mode=layer_mode)
@@ -158,6 +165,7 @@ class SimCLR:
             for params in self.net.backbone.layer3.parameters():
                 params.requires_grad = False
         else:
+            self.net.backbone.layer3.apply(utils.weights_init)
             optimizer.add_param_group({'params': self.net.backbone.layer3.parameters()})
         layer_mode = False if self.layers_frozen > 2 else True
         self.net.backbone.layer3.train(mode=layer_mode)
@@ -168,6 +176,8 @@ class SimCLR:
             for params in self.net.backbone.avgpool.parameters():
                 params.requires_grad = False
         else:
+            self.net.backbone.layer4.apply(utils.weights_init)
+            self.net.backbone.avgpool.apply(utils.weights_init)
             optimizer.add_param_group({'params': self.net.backbone.layer4.parameters()})
             optimizer.add_param_group({'params': self.net.backbone.avgpool.parameters()})
         layer_mode = False if self.layers_frozen > 3 else True
@@ -226,12 +236,12 @@ class SimCLR:
                 lr_scheduler.step()
             tqdm_bar.close()
         import os
-        if not os.path.isdir("../out/" + self.save_dir):
-            os.mkdir("../out/" + self.save_dir)
-        torch.save(self.net.backbone.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_backbone.pt")
-        dummy_classifier = nn.Linear(512, 12)
-        torch.save(dummy_classifier.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_classifier.pt")
         if self.save:
+            if not os.path.isdir("../out/" + self.save_dir):
+                os.mkdir("../out/" + self.save_dir)
+            torch.save(self.net.backbone.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_backbone.pt")
+            dummy_classifier = nn.Linear(512, 12)
+            torch.save(dummy_classifier.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_classifier.pt")
             tb_writer.close()
             
     def get_knn_accuracy(self):
