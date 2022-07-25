@@ -9,6 +9,7 @@ import torchvision.datasets as datasets
 import torch.utils.data as torchdata
 import torch.nn as nn
 from torch.autograd import Function
+import tqdm
 
 
 class GradReverse(Function):
@@ -54,24 +55,80 @@ class Network(nn.Module):
                                                nn.Linear(1024, 1)
                                                )
         
-    def forward(self, x):
+    def forward(self, x, source_size):
         """
         Forward method
         """
         feats = self.backbone(x)
         feats = feats.view(feats.size(0), -1)
-        logits = self.classifier(feats)
+        feats_source = feats[:source_size]
+        logits = self.classifier(feats_source)
         grad_reversed_out = grad_reverse(feats)
         dom = self.domain_classifier(grad_reversed_out)
-        return feats, logits, dom
+        return feats, logits, dom.squeeze()
+    
+    
+class Experiment:
+    """
+    Class used to run the experiments
+    """
+    def __init__(self):
+        transform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+                                        transforms.Normalize()])
+        self.dataset1 = datasets.MNIST(root="../data/", train=True)
     
     
 if __name__ == "__main__":
-    data = torch.randn((5, 3, 32, 32))
     net = Network()
-    f, l, d = net.forward(data)
-    print(f.shape, d.shape, l.shape)
-    loss = nn.CrossEntropyLoss()(l, torch.zeros(5).long())
-    loss += torch.mean(d)
-    loss.backward()
+    optimizer = torch.optim.SGD(net.backbone.parameters(), lr=0.01, weight_decay=1e-5)
+    optimizer.add_param_group({'params': net.classifier.parameters()})
+    optimizer.add_param_group({'params': net.domain_classifier.parameters()})
+    mnist_transform = transforms.Compose([transforms.Grayscale(3),
+                                          transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5, brightness=0.3),
+                                          transforms.Resize(32),
+                                          transforms.ToTensor(),
+                                          # transforms.Normalize(mean=(0.1307, 0.1307, 0.1307),
+                                          #                      std=(0.3081, 0.3081, 0.3081))
+                                          ])
     
+    svhn_transform = transforms.Compose([transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5, brightness=0.3),
+                                         transforms.Resize(32),
+                                         transforms.ToTensor(),
+                                         # transforms.Normalize(mean=(0.4377, 0.4437, 0.4728),
+                                         #                      std=(0.1980, 0.2010, 0.1970))
+                                         ])
+    
+    dataset1 = datasets.MNIST(root="../data/", train=True, transform=mnist_transform, download=True)
+    dataset2 = datasets.SVHN(root="../data/", split='train', download=True, transform=svhn_transform)
+    
+    loader_1 = torchdata.DataLoader(dataset1, batch_size=128, shuffle=True, num_workers=4)
+    loader_2 = torchdata.DataLoader(dataset2, batch_size=128, shuffle=True, num_workers=4)
+    loader_2_iter = iter(loader_2)
+    net = net.cuda()
+    num_epochs = 2
+    for ep in range(1, num_epochs + 1):
+        tqdm_bar = tqdm.tqdm(loader_1)
+        for img1, labels1 in tqdm_bar:
+            try:
+                img2, labels2 = next(loader_2_iter)
+            except StopIteration:
+                loader_2_iter = iter(loader_2)
+                img2, labels2 = next(loader_2_iter)
+            optimizer.zero_grad()
+            images = torch.concat([img1, img2], dim=0)
+            b_size = images.size(0)
+            dom_labels = torch.cat([torch.zeros(img1.size(0)), torch.ones(img2.size(0))])
+            images, dom_labels, labels1 = images.cuda(), dom_labels.cuda(), labels1.cuda()
+            
+            f, l, d = net.forward(images, img1.size(0))
+            ce_loss = nn.CrossEntropyLoss()(l, labels1)
+            
+            dom_pred = torch.sigmoid(d)
+            dom_loss = nn.BCELoss()(dom_pred, dom_labels)
+            
+            total_loss = ce_loss + dom_loss
+            total_loss.backward()
+            tqdm_bar.set_description("Ep: {}/{}  CE Loss: {:.4f}  Dom Loss: {:.4f}".format(ep, num_epochs,
+                                                                                           ce_loss.item(),
+                                                                                           dom_loss.item()))
+            optimizer.step()
