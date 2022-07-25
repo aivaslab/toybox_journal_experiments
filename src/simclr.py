@@ -87,6 +87,7 @@ class SimCLR:
         self.backbone_file_name = self.args['backbone_file']
         self.layers_frozen = self.args['layers_frozen']
         self.save_dir = self.args['save_dir']
+        self.accum_steps = 4  # TODO: add this to exp_args
         self.net = Network(backbone_file=self.backbone_file_name)
 
         color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
@@ -203,7 +204,8 @@ class SimCLR:
             tb_writer = tb.SummaryWriter(log_dir="../runs/" + self.save_dir + "/")
         optimizer = self.prepare_network_for_training()
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                                  T_max=self.num_epochs * len(self.train_loader),
+                                                                  T_max=self.num_epochs *
+                                                                  (len(self.train_loader) // self.accum_steps + 1),
                                                                   eta_min=1e-6)
         if self.num_epochs == 0:
             return
@@ -226,17 +228,22 @@ class SimCLR:
                                          .format(ep, self.num_epochs, optimizer.param_groups[0]['lr'],
                                                  total_loss/batches))
                 if self.save:
-                    tb_writer.add_scalar(tag='Loss/Batch', scalar_value=loss.item(), global_step=total_batches)
-                    tb_writer.add_scalar(tag='Loss/Avg', scalar_value=total_loss/batches,
+                    tb_writer.add_scalars(main_tag="Training", tag_scalar_dict={'Batch Loss': loss.item(),
+                                                                                'Epoch Avg Loss': total_loss/batches,
+                                                                                },
+                                          global_step=total_batches)
+                    tb_writer.add_scalar(tag='Training_LR', scalar_value=optimizer.param_groups[0]['lr'],
                                          global_step=total_batches)
-                    tb_writer.add_scalar(tag='LR', scalar_value=optimizer.param_groups[0]['lr'],
-                                         global_step=total_batches)
+                    
+                loss = loss / self.accum_steps
                 loss.backward()
-                optimizer.step()
-                lr_scheduler.step()
+                if (batches + 1) % self.accum_steps == 0 or batches + 1 == len(self.train_loader):
+                    optimizer.step()
+                    lr_scheduler.step()
             tqdm_bar.close()
-        import os
+        
         if self.save:
+            import os
             if not os.path.isdir("../out/" + self.save_dir):
                 os.mkdir("../out/" + self.save_dir)
             torch.save(self.net.backbone.state_dict(), "../out/" + self.save_dir + "/ssl_resnet18_backbone.pt")
