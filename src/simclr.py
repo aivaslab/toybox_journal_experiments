@@ -91,7 +91,7 @@ class SimCLR:
         self.net = Network(backbone_file=self.backbone_file_name)
 
         color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8, hue=0.2, saturation=0.8)
-        gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=1.0)
+        gaussian_blur = transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.RandomApply([color_jitter], p=0.8),
@@ -210,12 +210,12 @@ class SimCLR:
         if self.num_epochs == 0:
             return
         total_batches = 0
+        optimizer.zero_grad()
         for ep in range(1, self.num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.train_loader)
             batches = 0
             total_loss = 0.0
             for idx, images in tqdm_bar:
-                optimizer.zero_grad()
                 images = torch.cat(images, 0)
                 images = images.cuda()
                 feats = self.net.forward(images)
@@ -240,6 +240,7 @@ class SimCLR:
                 if (batches + 1) % self.accum_steps == 0 or batches + 1 == len(self.train_loader):
                     optimizer.step()
                     lr_scheduler.step()
+                    optimizer.zero_grad()
             tqdm_bar.close()
         
         if self.save:
