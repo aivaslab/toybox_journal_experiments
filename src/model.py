@@ -119,7 +119,7 @@ class Experiment:
                     logger.info("Loading backbone weights from %s", backbone_file_name)
                     utils.tryAssert(os.path.isfile, backbone_file_name, "File not found {}".format(backbone_file_name))
                     classifier_file_name = load_dir + load_comp + "_" + self.config_dict['model']['name'] \
-                                           + "_classifier.pt"
+                                                    + "_classifier.pt"
                     logger.info("Loading classifier weights from %s", classifier_file_name)
                     utils.tryAssert(os.path.isfile, classifier_file_name, "File not found {}".format(
                         classifier_file_name))
@@ -140,7 +140,7 @@ class Experiment:
         Reset weights of the network
         """
         if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-            torch.nn.init.xavier_uniform(m.weight.data)
+            torch.nn.init.xavier_uniform_(m.weight.data)
             
     @staticmethod
     def get_train_transform(mean, std):
@@ -392,26 +392,49 @@ class Experiment:
                                                                'batch_loss_train': loss.item()
                                                                },
                                               global_step=total_batches)
-            
+                    if total_batches % self.config_dict['save_frequency_batch'] == 0:
+                        backbone_file_name = self.config_dict['save_dir'] + self.components[self.run_id] + "_" + \
+                                             self.config_dict['model']['name'] + "_backbone_batch_" + \
+                                             str(total_batches) + ".pt"
+                        logger.debug("Saving backbone to %s", backbone_file_name)
+                        torch.save(self.backbone.state_dict(), backbone_file_name)
+                        classifier_file_name = self.config_dict['save_dir'] + self.components[self.run_id] + "_" \
+                                                                            + self.config_dict['model']['name'] \
+                                                                            + "_classifier_batch_" \
+                                                                            + str(total_batches) + ".pt"
+                        logger.debug("Saving classifier to %s", classifier_file_name)
+                        torch.save(self.classifier.state_dict(), classifier_file_name)
+                        
                 tqdm_bar.set_description("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs,
                                                                                              batch_lr, avg_loss))
             
                 combined_scheduler.step()
-        
+            
             # Write average training error at end of epoch into log file.
             logger.info("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs, batch_lr, avg_loss))
         
             tqdm_bar.close()
-    
+            if self.config_dict['save'] and epoch % self.config_dict['save_frequency'] == 0:
+                backbone_file_name = self.config_dict['save_dir'] + self.components[self.run_id] + "_" + \
+                                     self.config_dict['model']['name'] + "_backbone_epoch_" + str(epoch) + ".pt"
+                logger.info("Saving backbone to %s", backbone_file_name)
+                torch.save(self.backbone.state_dict(), backbone_file_name)
+                classifier_file_name = self.config_dict['save_dir'] + self.components[self.run_id] + "_" \
+                                                                    + self.config_dict['model']['name'] \
+                                                                    + "_classifier_epoch_" + str(epoch) + ".pt"
+                logger.info("Saving classifier to %s", classifier_file_name)
+                torch.save(self.classifier.state_dict(), classifier_file_name)
+                
         # If models have to be saved, save both classifier and backbone in the
         # directory specified in 'save_dir' of config_dict.
         if self.config_dict['save']:
             backbone_file_name = self.config_dict['save_dir'] + self.components[self.run_id] + "_" + \
-                                 self.config_dict['model']['name'] + "_backbone.pt"
+                                 self.config_dict['model']['name'] + "_backbone_final.pt"
             logger.info("Saving backbone to %s", backbone_file_name)
             torch.save(self.backbone.state_dict(), backbone_file_name)
             classifier_file_name = self.config_dict['save_dir'] + self.components[self.run_id] + "_" \
-                                   + self.config_dict['model']['name'] + "_classifier.pt"
+                                                                + self.config_dict['model']['name'] \
+                                                                + "_classifier_final.pt"
             logger.info("Saving classifier to %s", classifier_file_name)
             torch.save(self.classifier.state_dict(), classifier_file_name)
     
