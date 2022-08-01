@@ -13,6 +13,7 @@ import datetime
 import os
 import csv
 import argparse
+import pickle
 
 import dataset_imagenet12
 import utils
@@ -69,13 +70,16 @@ class NNTrainer:
     Train the model and run eval periodically with specified data
     """
     
-    def __init__(self, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False):
+    def __init__(self, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False, save_frequency=100,
+                 save_frequency_batch=10000):
         self.fraction = fraction
         self.hypertune = hypertune
         self.epochs = epochs
         self.save = save
         self.logger = logr
         self.log_test_error = log_test_error
+        self.save_frequency = save_frequency
+        self.save_frequence_batch = save_frequency_batch
         
         self.net = Network()
         self.train_transform = transforms.Compose([
@@ -153,6 +157,8 @@ class NNTrainer:
         batch_lr = optimizer.param_groups[0]['lr']
         dt_now = datetime.datetime.now().strftime("%b-%d-%Y-%H-%M")
         tb_writer = tb.SummaryWriter(log_dir=RUNS_DIR + dt_now + "/")
+        batch_accs = {}
+        epoch_accs = {}
         for epoch in range(1, num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.train_loader)
             batch_counter = 0
@@ -178,53 +184,45 @@ class NNTrainer:
                 batch_lr = optimizer.param_groups[0]['lr']
                 if self.save:
                     tb_writer.add_scalar(tag='Train/LR', scalar_value=batch_lr, global_step=total_batches)
-                    
-                    if (total_batches % len(self.train_loader) == 1 or
-                        total_batches == num_epochs * len(self.train_loader)) and \
-                            self.log_test_error and \
-                            self.test_loader is not None:
-                        
-                        test_loss_total = 0.0
-                        batch_count_loss = 0
-                        for _, (indices_test, images_test, labels_test) in enumerate(self.test_loader):
-                            images_test = images_test.cuda(non_blocking=True)
-                            labels_test = labels_test.cuda(non_blocking=True)
-                            if len(images_test.size()) == 5:
-                                b_size, n_crops, c, h, w = images_test.size()
-                            else:
-                                b_size, c, h, w = images_test.size()
-                                n_crops = 1
-                            with torch.no_grad():
-                                feats_test = self.net.backbone.forward(images_test.view(-1, c, h, w))
-                                logits_test = self.net.classifier(feats_test)
-                                logits_test_avg = logits_test.view(b_size, n_crops, -1).mean(1)
-                                test_loss = nn.CrossEntropyLoss()(logits_test_avg, labels_test)
-                            test_loss_total += test_loss.item()
-                            batch_count_loss += 1
-                        avg_loss_test = test_loss_total / batch_count_loss
-                        tb_writer.add_scalars(main_tag='/Loss',
-                                              tag_scalar_dict={'avg_loss_train': avg_loss,
-                                                               'batch_loss_train': loss.item(),
-                                                               'loss_test': avg_loss_test
-                                                               },
-                                              global_step=total_batches)
-                    else:
-                        tb_writer.add_scalars(main_tag='/Loss',
-                                              tag_scalar_dict={'avg_loss_train': avg_loss,
-                                                               'batch_loss_train': loss.item()
-                                                               },
-                                              global_step=total_batches)
+                    tb_writer.add_scalars(main_tag='Train/Loss',
+                                          tag_scalar_dict={'avg_loss_train': avg_loss,
+                                                           'batch_loss_train': loss.item()
+                                                           },
+                                          global_step=total_batches)
                 
                 tqdm_bar.set_description("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs,
                                                                                              batch_lr, avg_loss))
                 
                 combined_scheduler.step()
+                
+                if self.save and total_batches % self.save_frequence_batch == 0:
+                    os.makedirs(OUTPUT_DIR + dt_now, exist_ok=True)
+                    backbone_file_name = OUTPUT_DIR + dt_now + "/backbone_batch_" + str(total_batches) + ".pt"
+                    self.logger.info("Saving backbone to %s", backbone_file_name)
+                    torch.save(self.net.backbone.state_dict(), backbone_file_name)
+                    classifier_file_name = OUTPUT_DIR + dt_now + "/classifier_batch_" + str(total_batches) + ".pt"
+                    self.logger.info("Saving classifier to %s", classifier_file_name)
+                    torch.save(self.net.classifier.state_dict(), classifier_file_name)
+                    acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/eval_batch_" + str(total_batches)
+                                                                   + ".csv")
+                    batch_accs[total_batches] = acc
             
             # Write average training error at end of epoch into log file.
             self.logger.info("Epoch: {:d}/{:d}  LR: {:.5f}  Loss: {:.4f}".format(epoch, num_epochs, batch_lr, avg_loss))
             
             tqdm_bar.close()
-        
+            
+            if self.save and epoch % self.save_frequency == 0:
+                os.makedirs(OUTPUT_DIR + dt_now, exist_ok=True)
+                backbone_file_name = OUTPUT_DIR + dt_now + "/backbone_epoch_" + str(epoch) + ".pt"
+                self.logger.info("Saving backbone to %s", backbone_file_name)
+                torch.save(self.net.backbone.state_dict(), backbone_file_name)
+                classifier_file_name = OUTPUT_DIR + dt_now + "/classifier_epoch_" + str(epoch) + ".pt"
+                self.logger.info("Saving classifier to %s", classifier_file_name)
+                torch.save(self.net.classifier.state_dict(), classifier_file_name)
+                acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/eval_epoch_" + str(epoch) + ".csv")
+                epoch_accs[epoch] = acc
+            
         # If models have to be saved, save both classifier and backbone in the
         # directory specified in 'save_dir' of config_dict.
         if self.save:
@@ -235,8 +233,22 @@ class NNTrainer:
             classifier_file_name = OUTPUT_DIR + dt_now + "/classifier_final.pt"
             self.logger.info("Saving classifier to %s", classifier_file_name)
             torch.save(self.net.classifier.state_dict(), classifier_file_name)
-        acc = self.eval_model(csv_file_name=OUTPUT_DIR+dt_now+"/eval_final.csv")
+            acc = self.eval_model(csv_file_name=OUTPUT_DIR+dt_now+"/eval_final.csv")
+        else:
+            acc = self.eval_model()
         self.logger.info("Final accuracy on test set: {:.2f}".format(acc))
+        if self.save:
+            batch_acc_file_name = OUTPUT_DIR + dt_now + "/batch_accs.pkl"
+            batch_acc_file = open(batch_acc_file_name, "wb")
+            pickle.dump(batch_accs, batch_acc_file, protocol=pickle.DEFAULT_PROTOCOL)
+            batch_acc_file.close()
+            
+            epoch_acc_file_name = OUTPUT_DIR + dt_now + "/epoch_accs.pkl"
+            epoch_acc_file = open(epoch_acc_file_name, "wb")
+            pickle.dump(epoch_accs, epoch_acc_file, protocol=pickle.DEFAULT_PROTOCOL)
+            epoch_acc_file.close()
+        print(batch_accs)
+        print(epoch_accs)
 
     def eval_model(self, csv_file_name=None):
         """
@@ -299,6 +311,8 @@ class Experiment:
                                  hypertune=not self.exp_args['final'],
                                  save=self.exp_args['save'],
                                  log_test_error=self.exp_args['log_test_error'],
+                                 save_frequency=self.exp_args['save_frequency'],
+                                 save_frequency_batch=self.exp_args['save_frequency_batch']
                                  )
     
     def run(self):
@@ -317,6 +331,8 @@ def get_parser():
     parser.add_argument("--log-test-error", "-lte", default=False, action='store_true')
     parser.add_argument("--final", default=False, action='store_true')
     parser.add_argument("--log-level", "-ll", default="info", type=str)
+    parser.add_argument("--save-frequency", "-sf", default=100, type=int)
+    parser.add_argument("--save-frequency-batch", "-sfb", default=10000, type=int)
     return parser.parse_args()
 
     
