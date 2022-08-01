@@ -12,6 +12,7 @@ import logging
 import datetime
 import os
 import csv
+import argparse
 
 import dataset_imagenet12
 import utils
@@ -250,7 +251,7 @@ class NNTrainer:
         save_csv_file = None
         csv_writer = None
         if csv_file_name is not None:
-            logger.debug("Saving predictions to %s", csv_file_name)
+            self.logger.debug("Saving predictions to %s", csv_file_name)
             save_csv_file = open(csv_file_name, "w")
             csv_writer = csv.writer(save_csv_file)
             csv_writer.writerow(["Index", "True Label", "Predicted Label"])
@@ -280,12 +281,48 @@ class NNTrainer:
             save_csv_file.close()
         self.net.classifier.train()
         return top1acc
+    
+    
+class Experiment:
+    """
+    Experiment class
+    """
+    def __init__(self, exp_args):
+        self.exp_args = exp_args
+        print(self.exp_args)
+        log_level = getattr(logging, self.exp_args['log_level'].upper())
+        logging.basicConfig(format=LOG_FORMAT_TERMINAL, level=log_level)
+        logger = logging.getLogger()
+        self.trainer = NNTrainer(fraction=self.exp_args['fraction'],
+                                 epochs=self.exp_args['epochs'],
+                                 logr=logger,
+                                 hypertune=not self.exp_args['final'],
+                                 save=self.exp_args['save'],
+                                 log_test_error=self.exp_args['log_test_error'],
+                                 )
+    
+    def run(self):
+        """
+        Run the experiment
+        """
+        self.trainer.train()
 
 
+def get_parser():
+    """Generate parser for the experiments"""
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--epochs", "-e", default=10, type=int)
+    parser.add_argument("--fraction", "-f", default=0.5, type=float)
+    parser.add_argument("--save", "-s", default=False, action='store_true')
+    parser.add_argument("--log-test-error", "-lte", default=False, action='store_true')
+    parser.add_argument("--final", default=False, action='store_true')
+    parser.add_argument("--log-level", "-ll", default="info", type=str)
+    return parser.parse_args()
+
+    
 if __name__ == "__main__":
-    log_level = getattr(logging, "INFO")
-    logging.basicConfig(format=LOG_FORMAT_TERMINAL, level=log_level)
-    logger = logging.getLogger()
-    exp = NNTrainer(fraction=0.1, epochs=3, logr=logger, hypertune=True, save=True, log_test_error=False)
-    exp.train()
+    args = vars(get_parser())
+    
+    exp = Experiment(exp_args=args)
+    exp.run()
     
