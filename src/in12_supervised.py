@@ -11,6 +11,7 @@ import torch.utils.tensorboard as tb
 import logging
 import datetime
 import os
+import csv
 
 import dataset_imagenet12
 import utils
@@ -93,7 +94,7 @@ class NNTrainer:
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=128, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
         
-        self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=True,
+        self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=False,
                                                 persistent_workers=True, pin_memory=True)
 
     def prepare_model_for_run(self):
@@ -233,6 +234,52 @@ class NNTrainer:
             classifier_file_name = OUTPUT_DIR + dt_now + "/classifier_final.pt"
             self.logger.info("Saving classifier to %s", classifier_file_name)
             torch.save(self.net.classifier.state_dict(), classifier_file_name)
+        acc = self.eval_model(csv_file_name=OUTPUT_DIR+dt_now+"/eval_final.csv")
+        self.logger.info("Final accuracy on test set: {:.2f}".format(acc))
+
+    def eval_model(self, csv_file_name=None):
+        """
+        This method calculates the accuracies on the provided
+        dataloader for the current model defined by backbone
+        and classifier.
+        """
+        self.net.classifier.eval()
+        top1acc = 0
+        tot_train_points = 0
+        
+        save_csv_file = None
+        csv_writer = None
+        if csv_file_name is not None:
+            logger.debug("Saving predictions to %s", csv_file_name)
+            save_csv_file = open(csv_file_name, "w")
+            csv_writer = csv.writer(save_csv_file)
+            csv_writer.writerow(["Index", "True Label", "Predicted Label"])
+    
+        # Iterate over batches and calculate top-1 accuracy
+        for _, (indices, images, labels) in enumerate(self.test_loader):
+            images = images.cuda(non_blocking=True)
+            labels = labels.cuda(non_blocking=True)
+            if len(images.size()) == 5:
+                b_size, n_crops, c, h, w = images.size()
+            else:
+                b_size, c, h, w = images.size()
+                n_crops = 1
+            with torch.no_grad():
+                feats = self.net.backbone.forward(images.view(-1, c, h, w))
+                logits = self.net.classifier(feats)
+                logits_avg = logits.view(b_size, n_crops, -1).mean(dim=1)
+            top, pred = utils.calc_accuracy(logits_avg, labels, topk=(1,))
+            top1acc += top[0].item() * pred.shape[0]
+            tot_train_points += pred.shape[0]
+            if csv_file_name is not None:
+                indices, labels, pred = indices.cpu().numpy(), labels.cpu().numpy(), pred.cpu().numpy()
+                for idx in range(pred.shape[0]):
+                    csv_writer.writerow([indices[idx], labels[idx], pred[idx]])
+        top1acc /= tot_train_points
+        if csv_file_name is not None:
+            save_csv_file.close()
+        self.net.classifier.train()
+        return top1acc
 
 
 if __name__ == "__main__":
@@ -241,3 +288,4 @@ if __name__ == "__main__":
     logger = logging.getLogger()
     exp = NNTrainer(fraction=0.1, epochs=3, logr=logger, hypertune=True, save=True, log_test_error=False)
     exp.train()
+    
