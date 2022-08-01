@@ -54,6 +54,7 @@ class Network(nn.Module):
         self.backbone = models.resnet18(pretrained=False)
         self.fc_size = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
+        self.backbone.load_state_dict(torch.load("../out/toybox_baseline/backbone_trainer_resnet18_backbone.pt"))
         self.classifier = nn.Linear(self.fc_size, 12)
         self.domain_classifier = nn.Linear(self.fc_size, 1)
     
@@ -78,18 +79,24 @@ class Experiment:
     def __init__(self):
         self.net = Network()
         
-        self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=0.01, weight_decay=1e-5, momentum=0.9)
-        self.optimizer.add_param_group({'params': self.net.classifier.parameters()})
-        
+        self.optimizer = torch.optim.SGD(self.net.classifier.parameters(), lr=0.01, weight_decay=1e-5, momentum=0.9)
+        self.optimizer.add_param_group({'params': self.net.backbone.parameters()})
         self.optimizer.add_param_group({'params': self.net.domain_classifier.parameters()})
-        in12_train_transform = transforms.Compose([  # transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5,
-                                                   # brightness=0.3),
-                                                  transforms.ToPILImage(),
-                                                  transforms.Resize(224),
-                                                  transforms.RandomHorizontalFlip(),
-                                                  transforms.ToTensor(),
-                                                  transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
-                                                  ])
+        for params in self.net.backbone.parameters():
+            params.requires_grad = True
+        
+        total_params = sum(p.numel() for p in self.net.backbone.parameters())
+        train_params = sum(p.numel() for p in self.net.backbone.parameters() if p.requires_grad)
+        print(train_params, total_params)
+        in12_train_transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0, brightness=0.3),
+            # transforms.ToPILImage(),
+            transforms.Resize(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
+            ])
         
         in12_test_transform = transforms.Compose([transforms.ToPILImage(), transforms.Resize(224),
                                                   transforms.ToTensor(),
@@ -98,18 +105,19 @@ class Experiment:
         
         tb_transform = transforms.Compose(
             [
-                # transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5, brightness=0.3),
                 transforms.ToPILImage(),
+                transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5, brightness=0.3),
+                # transforms.ToPILImage(),
                 transforms.Resize(224),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)
             ])
         
-        self.dataset1 = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True,
-                                                             transform=in12_train_transform, fraction=0.1)
-        self.dataset2 = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, train=True, transform=tb_transform,
+        self.dataset2 = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=True,
+                                                             transform=in12_train_transform, fraction=1.0)
+        self.dataset1 = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, train=True, transform=tb_transform,
                                                      rng=np.random.default_rng(), num_instances=-1,
-                                                     num_images_per_class=500, hypertune=True)
+                                                     num_images_per_class=1000, hypertune=True)
         
         self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=64, shuffle=True, num_workers=4)
         self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=64, shuffle=True, num_workers=4)
@@ -132,7 +140,7 @@ class Experiment:
         dt_now = datetime.datetime.now()
         tb_writer = tb.SummaryWriter(log_dir="../runs/dann_tb_temp_" + dt_now.strftime("%b-%d-%Y-%H-%M") + "/")
         loader_2_iter = iter(self.loader_2)
-        num_epochs = 10
+        num_epochs = 20
         self.net.backbone.train()
         self.net.classifier.train()
         self.net.domain_classifier.train()
@@ -152,7 +160,7 @@ class Experiment:
                 images, dom_labels, labels1 = images.cuda(), dom_labels.cuda(), labels1.cuda()
                 
                 p = total_batches / (len(self.loader_1) * num_epochs)
-                alfa = 2 / (1 + math.exp(-10 * p)) - 1
+                alfa = 2 / (1 + math.exp(-3 * p)) - 1
                 
                 f, l, d = self.net.forward(images, img1.size(0), alpha=alfa)
                 ce_loss = nn.CrossEntropyLoss()(l, labels1)

@@ -43,26 +43,26 @@ class Network(nn.Module):
         self.backbone = nn.Sequential(nn.Conv2d(in_channels=3, out_channels=64, kernel_size=(5, 5)),
                                       nn.ReLU(),
                                       nn.Dropout(p=0.1),
-                                      nn.BatchNorm2d(num_features=64),
+                                      # nn.BatchNorm2d(num_features=64),
                                       nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2)),
                                       nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(5, 5)),
                                       nn.ReLU(),
                                       nn.Dropout(p=0.25),
-                                      nn.BatchNorm2d(num_features=64),
+                                      # nn.BatchNorm2d(num_features=64),
                                       nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2)),
                                       nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(4, 4)),
                                       nn.Dropout(p=0.25),
-                                      nn.BatchNorm2d(num_features=128)
+                                      # nn.BatchNorm2d(num_features=128)
                                       )
-        self.classifier = nn.Sequential(nn.Linear(128, 3072), nn.ReLU(), nn.BatchNorm1d(num_features=3072),
+        self.classifier = nn.Sequential(nn.Linear(128, 3072), nn.ReLU(), # nn.BatchNorm1d(num_features=3072),
                                         nn.Dropout(),
-                                        nn.Linear(3072, 2048), nn.ReLU(), nn.BatchNorm1d(num_features=2048),
+                                        nn.Linear(3072, 2048), nn.ReLU(), # nn.BatchNorm1d(num_features=2048),
                                         nn.Dropout(),
                                         nn.Linear(2048, 10)
                                         )
-        self.domain_classifier = nn.Sequential(nn.Linear(128, 1024), nn.ReLU(), nn.BatchNorm1d(num_features=1024),
+        self.domain_classifier = nn.Sequential(nn.Linear(128, 1024), nn.ReLU(), # nn.BatchNorm1d(num_features=1024),
                                                nn.Dropout(),
-                                               nn.Linear(1024, 1024), nn.ReLU(), nn.BatchNorm1d(num_features=1024),
+                                               nn.Linear(1024, 1024), nn.ReLU(), # nn.BatchNorm1d(num_features=1024),
                                                nn.Dropout(),
                                                nn.Linear(1024, 1)
                                                )
@@ -134,7 +134,7 @@ class Experiment:
         dt_now = datetime.datetime.now()
         tb_writer = tb.SummaryWriter(log_dir="../runs/dann_temp_" + dt_now.strftime("%b-%d-%Y-%H-%M") + "/")
         loader_2_iter = iter(self.loader_2)
-        num_epochs = 50
+        num_epochs = 100
         self.net.backbone.train()
         self.net.classifier.train()
         self.net.domain_classifier.train()
@@ -185,7 +185,7 @@ class Experiment:
                                       global_step=total_batches)
             
             if (ep + 1) % 20 == 0:
-                self.optimizer.param_groups[0]['lr'] *= 0.9
+                self.optimizer.param_groups[0]['lr'] *= 1.0
         tb_writer.close()
     
     def eval(self):
@@ -213,6 +213,6 @@ class Experiment:
 
 
 if __name__ == "__main__":
-    exp = Experiment(train_on_svhn=True, dual_train=True)
+    exp = Experiment(train_on_svhn=False, dual_train=False)
     exp.train()
     exp.eval()
