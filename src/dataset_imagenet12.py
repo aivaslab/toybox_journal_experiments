@@ -52,7 +52,6 @@ class DataLoaderGeneric(torchdata.Dataset):
                         all_indices = np.arange(i * len_images_class, (i + 1) * len_images_class)
                         sel_indices = rng.choice(all_indices, len_train_images_class, replace=False)
                         self.selected_indices = self.selected_indices + list(sel_indices)
-                    self.logger.debug(len(self.selected_indices))
                 else:
                     len_train_images = int(len_all_images * self.fraction)
                     self.selected_indices = rng.choice(len_all_images, len_train_images, replace=False)

@@ -49,11 +49,15 @@ class Network(nn.Module):
     Network for supervised experiments
     """
     
-    def __init__(self):
+    def __init__(self, backbone_file_name):
         super().__init__()
+        self.backbone_file_name = backbone_file_name
         self.backbone = models.resnet18(pretrained=False, num_classes=1000)
         self.fc_size = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
+        if os.path.isfile(self.backbone_file_name):
+            print("Loading backbone from {}".format(self.backbone_file_name))
+            self.backbone.load_state_dict(torch.load(self.backbone_file_name))
         self.classifier = nn.Linear(self.fc_size, 12)
     
     def forward(self, x):
@@ -70,8 +74,9 @@ class NNTrainer:
     Train the model and run eval periodically with specified data
     """
     
-    def __init__(self, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False, save_frequency=100,
-                 save_frequency_batch=10000):
+    def __init__(self, backbone_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
+                 save_frequency=100, save_frequency_batch=10000):
+        self.backbone_file = backbone_file
         self.fraction = fraction
         self.hypertune = hypertune
         self.epochs = epochs
@@ -81,9 +86,10 @@ class NNTrainer:
         self.save_frequency = save_frequency
         self.save_frequence_batch = save_frequency_batch
         
-        self.net = Network()
+        self.net = Network(backbone_file_name=backbone_file)
         self.train_transform = transforms.Compose([
             transforms.ToPILImage(),
+            # transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8),
             transforms.Resize(224),
             transforms.ToTensor(),
             transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
@@ -305,7 +311,8 @@ class Experiment:
         log_level = getattr(logging, self.exp_args['log_level'].upper())
         logging.basicConfig(format=LOG_FORMAT_TERMINAL, level=log_level)
         logger = logging.getLogger()
-        self.trainer = NNTrainer(fraction=self.exp_args['fraction'],
+        self.trainer = NNTrainer(backbone_file=self.exp_args['backbone'],
+                                 fraction=self.exp_args['fraction'],
                                  epochs=self.exp_args['epochs'],
                                  logr=logger,
                                  hypertune=not self.exp_args['final'],
@@ -325,6 +332,7 @@ class Experiment:
 def get_parser():
     """Generate parser for the experiments"""
     parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--backbone", "-bb", default="", type=str)
     parser.add_argument("--epochs", "-e", default=10, type=int)
     parser.add_argument("--fraction", "-f", default=0.5, type=float)
     parser.add_argument("--save", "-s", default=False, action='store_true')
