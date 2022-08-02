@@ -75,16 +75,17 @@ class NNTrainer:
     """
     
     def __init__(self, backbone_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01):
         self.backbone_file = backbone_file
         self.fraction = fraction
         self.hypertune = hypertune
         self.epochs = epochs
         self.save = save
         self.logger = logr
+        self.lr = lr
         self.log_test_error = log_test_error
         self.save_frequency = save_frequency
-        self.save_frequence_batch = save_frequency_batch
+        self.save_frequency_batch = save_frequency_batch
         
         self.net = Network(backbone_file_name=backbone_file)
         self.train_transform = transforms.Compose([
@@ -94,13 +95,21 @@ class NNTrainer:
             transforms.ToTensor(),
             transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
         ])
-        
+
+        self.test_transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
+        ])
+
+
         self.dataset_train = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=self.fraction,
                                                                   train=True, hypertune=self.hypertune,
                                                                   transform=self.train_transform)
         self.dataset_test = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False,
                                                                  hypertune=self.hypertune,
-                                                                 transform=self.train_transform)
+                                                                 transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=128, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
@@ -125,7 +134,7 @@ class NNTrainer:
     
         self.net.backbone.eval()
         self.net.classifier.train()
-        optimizer = torch.optim.SGD(self.net.classifier.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-5)
+        optimizer = torch.optim.SGD(self.net.classifier.parameters(), lr=self.lr, momentum=0.9, weight_decay=1e-5)
         
         return optimizer
     
@@ -201,7 +210,7 @@ class NNTrainer:
                 
                 combined_scheduler.step()
                 
-                if self.save and total_batches % self.save_frequence_batch == 0:
+                if self.save and total_batches % self.save_frequency_batch == 0:
                     os.makedirs(OUTPUT_DIR + dt_now, exist_ok=True)
                     backbone_file_name = OUTPUT_DIR + dt_now + "/backbone_batch_" + str(total_batches) + ".pt"
                     self.logger.info("Saving backbone to %s", backbone_file_name)
@@ -314,6 +323,7 @@ class Experiment:
         self.trainer = NNTrainer(backbone_file=self.exp_args['backbone'],
                                  fraction=self.exp_args['fraction'],
                                  epochs=self.exp_args['epochs'],
+                                 lr=self.exp_args['lr'],
                                  logr=logger,
                                  hypertune=not self.exp_args['final'],
                                  save=self.exp_args['save'],
@@ -335,6 +345,7 @@ def get_parser():
     parser.add_argument("--backbone", "-bb", default="", type=str)
     parser.add_argument("--epochs", "-e", default=10, type=int)
     parser.add_argument("--fraction", "-f", default=0.5, type=float)
+    parser.add_argument("--lr", "-lr", default=0.1, type=float)
     parser.add_argument("--save", "-s", default=False, action='store_true')
     parser.add_argument("--log-test-error", "-lte", default=False, action='store_true')
     parser.add_argument("--final", default=False, action='store_true')
