@@ -593,7 +593,8 @@ class Experiment:
             logger.debug("The training dataset is ImageNet+COCO. Preparing to initialize train_data....")
             train_transform = self.get_train_transform(mean=IN12_MEAN, std=IN12_STD)
             train_data = parse_config.get_dataset(dataset_imagenet12, 'DataLoaderGeneric', root=IN12_DATA_PATH,
-                                                  transform=train_transform, train=True)
+                                                  transform=train_transform, train=True, fraction=
+                                                  self.config_dict[comp]['args']['fraction'])
             if self.config_dict[comp]['args']['log_test_error']:
                 self.set_testing_data(test_set='imagenet_test')
         else:
