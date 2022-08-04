@@ -18,8 +18,8 @@ import utils
 import mean_teacher
 import dataset_mnist_svhn
 
-OUTPUT_DIR = "../out/IN12_SUP/"
-RUNS_DIR = "../runs/IN12_SUP/"
+OUTPUT_DIR = "../out/MNIST_SUP/"
+RUNS_DIR = "../runs/MNIST_SUP/"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(RUNS_DIR, exist_ok=True)
 
@@ -34,8 +34,8 @@ LOG_FORMAT_TERMINAL = '%(asctime)s:' + COLOR['GREEN'] + '%(filename)s' + COLOR['
                       + '%(levelname)s' + COLOR['ENDC'] + ': %(message)s'
 LOG_FORMAT_FILE = '%(asctime)s:%(filename)s:%(lineno)s:%(levelname)s:%(message)s'
 
-MNIST_MEAN = (0.1307, 0.1307, 0.1307)
-MNIST_STD = (0.3081, 0.3081, 0.3081)
+MNIST_MEAN = (0.1309, 0.1309, 0.1309)
+MNIST_STD = (0.2893, 0.2893, 0.2893)
 
 
 class Network(nn.Module):
@@ -95,9 +95,10 @@ class NNTrainer:
             transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
         ])
         
-        self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True,
+        self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=self.hypertune,
                                                              transform=self.train_transform)
-        self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, transform=self.test_transform)
+        self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=self.hypertune,
+                                                            transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
@@ -194,13 +195,10 @@ class NNTrainer:
                 
                 if self.save and total_batches % self.save_frequency_batch == 0:
                     os.makedirs(OUTPUT_DIR + dt_now, exist_ok=True)
-                    backbone_file_name = OUTPUT_DIR + dt_now + "/backbone_batch_" + str(total_batches) + ".pt"
-                    self.logger.info("Saving backbone to %s", backbone_file_name)
-                    torch.save(self.net.backbone.state_dict(), backbone_file_name)
-                    classifier_file_name = OUTPUT_DIR + dt_now + "/classifier_batch_" + str(total_batches) + ".pt"
-                    self.logger.info("Saving classifier to %s", classifier_file_name)
-                    torch.save(self.net.classifier.state_dict(), classifier_file_name)
-                    acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/eval_batch_" + str(total_batches)
+                    network_file_name = OUTPUT_DIR + dt_now + "/mnist_network_batch_" + str(total_batches) + ".pt"
+                    self.logger.info("Saving network to %s", network_file_name)
+                    torch.save(self.net.network.state_dict(), network_file_name)
+                    acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/mnist_eval_batch_" + str(total_batches)
                                                                    + ".csv")
                     batch_accs[total_batches] = acc
             
@@ -214,20 +212,18 @@ class NNTrainer:
                 network_file_name = OUTPUT_DIR + dt_now + "/mnist_network_epoch_" + str(epoch) + ".pt"
                 self.logger.info("Saving network to %s", network_file_name)
                 torch.save(self.net.network.state_dict(), network_file_name)
-                acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/eval_epoch_" + str(epoch) + ".csv")
+                acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/mnist_eval_epoch_" + str(epoch) + ".csv")
                 epoch_accs[epoch] = acc
         
         # If models have to be saved, save both classifier and backbone in the
         # directory specified in 'save_dir' of config_dict.
         if self.save:
             os.makedirs(OUTPUT_DIR + dt_now, exist_ok=True)
-            backbone_file_name = OUTPUT_DIR + dt_now + "/backbone_final.pt"
-            self.logger.info("Saving backbone to %s", backbone_file_name)
-            torch.save(self.net.backbone.state_dict(), backbone_file_name)
-            classifier_file_name = OUTPUT_DIR + dt_now + "/classifier_final.pt"
-            self.logger.info("Saving classifier to %s", classifier_file_name)
-            torch.save(self.net.classifier.state_dict(), classifier_file_name)
-            acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/eval_final.csv")
+            network_file_name = OUTPUT_DIR + dt_now + "/mnist_network_final.pt"
+            self.logger.info("Saving network to %s", network_file_name)
+            torch.save(self.net.network.state_dict(), network_file_name)
+            
+            acc = self.eval_model(csv_file_name=OUTPUT_DIR + dt_now + "/mnist_eval_final.csv")
             batch_acc_file_name = OUTPUT_DIR + dt_now + "/batch_accs.pkl"
             batch_acc_file = open(batch_acc_file_name, "wb")
             pickle.dump(batch_accs, batch_acc_file, protocol=pickle.DEFAULT_PROTOCOL)
