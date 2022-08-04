@@ -10,6 +10,13 @@ import tqdm
 import torch.utils.data as torchdata
 import torch.nn.functional as F
 
+import dataset_mnist_svhn
+
+MNIST_MEAN = (0.1309, 0.1309, 0.1309)
+MNIST_STD = (0.2893, 0.2893, 0.2893)
+SVHN_MEAN = (0.4377, 0.4438, 0.4728)
+SVHN_STD = (0.1980, 0.2010, 0.1970)
+
 
 class Network(nn.Module):
     """
@@ -75,7 +82,38 @@ class MeanTeacher:
     Module for implementing the mean teacher architecture
     """
     def __init__(self):
-        self.net = Network()
+        self.student = Network(n_classes=10)
+        self.teacher = Network(n_classes=10)
+        
+        self.mnist_train_transform = transforms.Compose([transforms.Grayscale(3),
+                                                         transforms.Resize(32),
+                                                         transforms.ToTensor(),
+                                                         transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)])
+        self.svhn_train_transform = transforms.Compose([transforms.Resize(32),
+                                                        transforms.ToTensor(),
+                                                        transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)])
+        
+        self.source_dataset = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=True,
+                                                              transform=self.mnist_train_transform)
+        self.target_dataset = dataset_mnist_svhn.DatasetSVHN(root="./data/", train=True, hypertune=True,
+                                                             transform=self.svhn_train_transform)
+        self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=256, shuffle=True, num_workers=4,
+                                                  pin_memory=True, persistent_workers=True)
+        self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=256, shuffle=True, num_workers=4,
+                                                  pin_memory=True, persistent_workers=True)
+        
+    def update_teacher(self):
+        """EMA update for the teacher's weights"""
+        for current_params, moving_params in zip(self.teacher.parameters(), self.student.parameters()):
+            current_weight, moving_weight = current_params.data, moving_params.data
+            current_params.data = current_weight * 0.999 + moving_weight * 0.001
+            
+    def train(self):
+        """Train the network"""
+        for params in self.student.parameters():
+            params.requires_grad = True
+        for params in self.teacher.parameters():
+            params.requires_grad = False
 
     
 class Experiment:
