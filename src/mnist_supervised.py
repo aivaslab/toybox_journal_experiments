@@ -3,7 +3,6 @@ Code for supervised experiments on MNIST dataset
 """
 import torch
 import torch.utils.data as torchdata
-import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import torch.nn as nn
 import tqdm
@@ -17,6 +16,7 @@ import pickle
 
 import utils
 import mean_teacher
+import dataset_mnist_svhn
 
 OUTPUT_DIR = "../out/IN12_SUP/"
 RUNS_DIR = "../runs/IN12_SUP/"
@@ -95,8 +95,9 @@ class NNTrainer:
             transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
         ])
         
-        self.dataset_train = datasets.MNIST(root="../data/", train=True, transform=self.train_transform)
-        self.dataset_test = datasets.MNIST(root="../data/", train=False, transform=self.test_transform)
+        self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True,
+                                                             transform=self.train_transform)
+        self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
@@ -160,7 +161,7 @@ class NNTrainer:
             tqdm_bar = tqdm.tqdm(self.train_loader)
             batch_counter = 0
             total_loss = 0.0
-            for images, labels in tqdm_bar:
+            for idxs, images, labels in tqdm_bar:
                 # Move data to GPU
                 images = images.cuda(0)
                 labels = labels.cuda(0)
@@ -262,7 +263,7 @@ class NNTrainer:
             csv_writer.writerow(["Index", "True Label", "Predicted Label"])
         
         # Iterate over batches and calculate top-1 accuracy
-        for _, (images, labels) in enumerate(self.test_loader):
+        for _, (indices,  images, labels) in enumerate(self.test_loader):
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
             if len(images.size()) == 5:
