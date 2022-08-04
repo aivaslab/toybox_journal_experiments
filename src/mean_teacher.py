@@ -3,19 +3,67 @@ Module for implementing the Mean Teacher model from the VisDA-2017 winning submi
 """
 import torch
 import torch.nn as nn
-import torchvision.models as models
 import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import tqdm
 import torch.utils.data as torchdata
-import torch.nn.functional as F
+import torch.nn.functional as functional
+import csv
 
 import dataset_mnist_svhn
+import utils
 
 MNIST_MEAN = (0.1309, 0.1309, 0.1309)
 MNIST_STD = (0.2893, 0.2893, 0.2893)
 SVHN_MEAN = (0.4377, 0.4438, 0.4728)
 SVHN_STD = (0.1980, 0.2010, 0.1970)
+
+
+def robust_binary_crossentropy(pred, tgt):
+    """sdf"""
+    inv_tgt = -tgt + 1.0
+    inv_pred = -pred + 1.0 + 1e-6
+    return -(tgt * torch.log(pred + 1.0e-6) + inv_tgt * torch.log(inv_pred))
+
+
+def compute_aug_loss(stu_out, tea_out):
+    """ Augmentation loss"""
+    confidence_thresh = 0.968
+    conf_tea = torch.max(tea_out, 1)[0]
+    unsup_mask = conf_mask = (conf_tea > confidence_thresh).float()
+    unsup_mask_count = conf_mask_count = conf_mask.sum()
+    
+    d_aug_loss = stu_out - tea_out
+    aug_loss = d_aug_loss * d_aug_loss
+    
+    # Class balance scaling
+    n_samples = unsup_mask.sum()
+    avg_pred = n_samples / float(10)
+    bal_scale = avg_pred / torch.clamp(tea_out.sum(dim=0), min=1.0)
+    bal_scale = bal_scale.detach()
+    aug_loss = aug_loss * bal_scale[None, :]
+    
+    aug_loss = aug_loss.mean(dim=1)
+    n_classes = 10
+    cls_bal_fn = robust_binary_crossentropy
+    unsup_loss = (aug_loss * unsup_mask).mean()
+    cls_balance = 0.05
+    rampup = 0
+    # Class balance loss
+    if cls_balance > 0.0:
+        # Compute per-sample average predicated probability
+        # Average over samples to get average class prediction
+        avg_cls_prob = stu_out.mean(dim=0)
+        # Compute loss
+        equalise_cls_loss = cls_bal_fn(avg_cls_prob, float(1.0 / n_classes))
+        
+        equalise_cls_loss = equalise_cls_loss.mean() * n_classes
+        
+        if rampup == 0:
+            equalise_cls_loss = equalise_cls_loss * unsup_mask.mean(dim=0)
+        
+        unsup_loss += equalise_cls_loss * cls_balance
+    
+    return unsup_loss, conf_mask_count, unsup_mask_count
 
 
 class Network(nn.Module):
@@ -26,7 +74,7 @@ class Network(nn.Module):
     
     def __init__(self, n_classes):
         super().__init__()
-    
+        
         self.conv1_1 = nn.Conv2d(3, 128, (3, 3), padding=1)
         self.conv1_1_bn = nn.BatchNorm2d(128)
         self.conv1_2 = nn.Conv2d(128, 128, (3, 3), padding=1)
@@ -35,7 +83,7 @@ class Network(nn.Module):
         self.conv1_3_bn = nn.BatchNorm2d(128)
         self.pool1 = nn.MaxPool2d((2, 2))
         self.drop1 = nn.Dropout()
-    
+        
         self.conv2_1 = nn.Conv2d(128, 256, (3, 3), padding=1)
         self.conv2_1_bn = nn.BatchNorm2d(256)
         self.conv2_2 = nn.Conv2d(256, 256, (3, 3), padding=1)
@@ -44,87 +92,259 @@ class Network(nn.Module):
         self.conv2_3_bn = nn.BatchNorm2d(256)
         self.pool2 = nn.MaxPool2d((2, 2))
         self.drop2 = nn.Dropout()
-    
+        
         self.conv3_1 = nn.Conv2d(256, 512, (3, 3), padding=0)
         self.conv3_1_bn = nn.BatchNorm2d(512)
         self.nin3_2 = nn.Conv2d(512, 256, (1, 1), padding=1)
         self.nin3_2_bn = nn.BatchNorm2d(256)
         self.nin3_3 = nn.Conv2d(256, 128, (1, 1), padding=1)
         self.nin3_3_bn = nn.BatchNorm2d(128)
-    
+        
         self.fc4 = nn.Linear(128, n_classes)
-
+    
     def forward(self, x):
         """Forward prop for the network"""
-        x = F.relu(self.conv1_1_bn(self.conv1_1(x)))
-        x = F.relu(self.conv1_2_bn(self.conv1_2(x)))
-        x = self.pool1(F.relu(self.conv1_3_bn(self.conv1_3(x))))
+        x = functional.relu(self.conv1_1_bn(self.conv1_1(x)))
+        x = functional.relu(self.conv1_2_bn(self.conv1_2(x)))
+        x = self.pool1(functional.relu(self.conv1_3_bn(self.conv1_3(x))))
         x = self.drop1(x)
-    
-        x = F.relu(self.conv2_1_bn(self.conv2_1(x)))
-        x = F.relu(self.conv2_2_bn(self.conv2_2(x)))
-        x = self.pool2(F.relu(self.conv2_3_bn(self.conv2_3(x))))
+        
+        x = functional.relu(self.conv2_1_bn(self.conv2_1(x)))
+        x = functional.relu(self.conv2_2_bn(self.conv2_2(x)))
+        x = self.pool2(functional.relu(self.conv2_3_bn(self.conv2_3(x))))
         x = self.drop2(x)
-    
-        x = F.relu(self.conv3_1_bn(self.conv3_1(x)))
-        x = F.relu(self.nin3_2_bn(self.nin3_2(x)))
-        x = F.relu(self.nin3_3_bn(self.nin3_3(x)))
-    
-        x = F.avg_pool2d(x, 6)
+        
+        x = functional.relu(self.conv3_1_bn(self.conv3_1(x)))
+        x = functional.relu(self.nin3_2_bn(self.nin3_2(x)))
+        x = functional.relu(self.nin3_3_bn(self.nin3_3(x)))
+        
+        x = functional.avg_pool2d(x, 6)
         x = x.view(-1, 128)
-    
+        
         x = self.fc4(x)
         return x
+    
+    def set_train_mode(self):
+        """
+        Set all params in training mode
+        """
+        self.conv1_1.train()
+        self.conv1_1_bn.train()
+        self.conv1_2.train()
+        self.conv1_2_bn.train()
+        self.conv1_3.train()
+        self.conv1_3_bn.train()
+        self.pool1.train()
+        self.drop1.train()
+        
+        self.conv2_1.train()
+        self.conv2_1_bn.train()
+        self.conv2_2.train()
+        self.conv2_2_bn.train()
+        self.conv2_3.train()
+        self.conv2_3_bn.train()
+        self.pool2.train()
+        self.drop2.train()
+        
+        self.conv3_1.train()
+        self.conv3_1_bn.train()
+        self.nin3_2.train()
+        self.nin3_2_bn.train()
+        self.nin3_3.train()
+        self.nin3_3_bn.train()
+        
+        self.fc4.train()
+    
+    def set_eval_mode(self):
+        """
+        Set all params in eval mode
+        """
+        self.conv1_1.eval()
+        self.conv1_1_bn.eval()
+        self.conv1_2.eval()
+        self.conv1_2_bn.eval()
+        self.conv1_3.eval()
+        self.conv1_3_bn.eval()
+        self.pool1.eval()
+        self.drop1.eval()
+        
+        self.conv2_1.eval()
+        self.conv2_1_bn.eval()
+        self.conv2_2.eval()
+        self.conv2_2_bn.eval()
+        self.conv2_3.eval()
+        self.conv2_3_bn.eval()
+        self.pool2.eval()
+        self.drop2.eval()
+        
+        self.conv3_1.eval()
+        self.conv3_1_bn.eval()
+        self.nin3_2.eval()
+        self.nin3_2_bn.eval()
+        self.nin3_3.eval()
+        self.nin3_3_bn.eval()
+        
+        self.fc4.eval()
 
 
 class MeanTeacher:
     """
     Module for implementing the mean teacher architecture
     """
+    
     def __init__(self):
         self.student = Network(n_classes=10)
         self.teacher = Network(n_classes=10)
         
         self.mnist_train_transform = transforms.Compose([transforms.Grayscale(3),
+                                                         transforms.RandomInvert(p=0.5),
+                                                         transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)),
+                                                         transforms.RandomHorizontalFlip(p=0.5),
                                                          transforms.Resize(32),
                                                          transforms.ToTensor(),
                                                          transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)])
         self.svhn_train_transform = transforms.Compose([transforms.Resize(32),
+                                                        transforms.RandomHorizontalFlip(p=0.5),
                                                         transforms.ToTensor(),
                                                         transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)])
         
         self.source_dataset = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=True,
                                                               transform=self.mnist_train_transform)
-        self.target_dataset = dataset_mnist_svhn.DatasetSVHN(root="./data/", train=True, hypertune=True,
+        self.target_dataset = dataset_mnist_svhn.DatasetSVHN(root="../data/", train=True, hypertune=True,
                                                              transform=self.svhn_train_transform)
         self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=256, shuffle=True, num_workers=4,
                                                   pin_memory=True, persistent_workers=True)
         self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=256, shuffle=True, num_workers=4,
                                                   pin_memory=True, persistent_workers=True)
-        
-    def update_teacher(self):
+    
+    def update_teacher(self, alpha=0.99):
         """EMA update for the teacher's weights"""
         for current_params, moving_params in zip(self.teacher.parameters(), self.student.parameters()):
             current_weight, moving_weight = current_params.data, moving_params.data
-            current_params.data = current_weight * 0.999 + moving_weight * 0.001
-            
+            current_params.data = current_weight * alpha + moving_weight * (1 - alpha)
+    
     def train(self):
         """Train the network"""
         for params in self.student.parameters():
             params.requires_grad = True
         for params in self.teacher.parameters():
             params.requires_grad = False
+        
+        self.student.set_train_mode()
+        self.teacher.set_train_mode()
+        self.student.cuda()
+        self.teacher.cuda()
+        
+        student_params_total = sum(p.numel() for p in self.student.parameters())
+        student_params_train = sum(p.numel() for p in self.student.parameters() if p.requires_grad)
+        print(
+            "{}/{} parameters in the student network are trainable".format(student_params_train, student_params_total))
+        
+        teacher_params_total = sum(p.numel() for p in self.teacher.parameters())
+        teacher_params_train = sum(p.numel() for p in self.teacher.parameters() if p.requires_grad)
+        print(
+            "{}/{} parameters in the teacher network are trainable".format(teacher_params_train, teacher_params_total))
+        
+        optimizer = torch.optim.Adam(self.student.parameters(), lr=0.01)
+        num_epochs = 5
+        target_loader_iter = iter(self.target_loader)
+        for epoch in range(1, num_epochs + 1):
+            tqdm_bar = tqdm.tqdm(self.source_loader)
+            for indices, images, labels in tqdm_bar:
+                try:
+                    indices2, images2, labels2 = next(target_loader_iter)
+                except StopIteration:
+                    target_loader_iter = iter(self.target_loader)
+                    indices2, images2, labels2 = next(target_loader_iter)
+                
+                optimizer.zero_grad()
+                images, labels = images.cuda(), labels.cuda()
+                images2 = images2.cuda()
+                
+                preds = self.student.forward(images)
+                cls_loss = nn.CrossEntropyLoss()(preds, labels)
+                
+                target_logits_student = torch.softmax(self.student.forward(images2), dim=1)
+                with torch.no_grad():
+                    target_logits_teacher = torch.softmax(self.teacher.forward(images2), dim=1)
+                
+                self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
+                unsup_weight = 3.0
+                loss = cls_loss + self_loss * unsup_weight
+                loss.backward()
+                optimizer.step()
+                self.update_teacher()
+                
+                tqdm_bar.set_description("Epoch: {}/{}  CLS Loss: {:.4f}  SELF Loss: {:.4f}  Total: {:.4f}  LR: {:.4f}".
+                                         format(epoch, num_epochs, cls_loss.item(), self_loss.item(),
+                                                loss.item(), optimizer.param_groups[0]['lr']))
+            tqdm_bar.close()
+            acc = self.eval_model(training=True)
+            print("Source accuracy:{:.2f}".format(acc))
+            acc = self.eval_model(training=False)
+            print("Target accuracy:{:.2f}".format(acc))
 
+    def eval_model(self, training=False, csv_file_name=None):
+        """
+        This method calculates the accuracies on the provided
+        dataloader for the current model defined by backbone
+        and classifier.
+        """
+        self.teacher.eval()
+        
+        top1acc = 0
+        tot_train_points = 0
     
+        save_csv_file = None
+        csv_writer = None
+        if csv_file_name is not None:
+            save_csv_file = open(csv_file_name, "w")
+            csv_writer = csv.writer(save_csv_file)
+            csv_writer.writerow(["Index", "True Label", "Predicted Label"])
+    
+        if training:
+            loader = self.source_loader
+        else:
+            loader = self.target_loader
+        # Iterate over batches and calculate top-1 accuracy
+        for _, (indices, images, labels) in enumerate(loader):
+            images = images.cuda(non_blocking=True)
+            labels = labels.cuda(non_blocking=True)
+            if len(images.size()) == 5:
+                b_size, n_crops, c, h, w = images.size()
+            else:
+                b_size, c, h, w = images.size()
+                n_crops = 1
+            with torch.no_grad():
+                logits = self.teacher.forward(images)
+                logits_avg = logits.view(b_size, n_crops, -1).mean(dim=1)
+            top, pred = utils.calc_accuracy(logits_avg, labels, topk=(1,))
+            top1acc += top[0].item() * pred.shape[0]
+            tot_train_points += pred.shape[0]
+            if csv_file_name is not None:
+                indices, labels, pred = indices.cpu().numpy(), labels.cpu().numpy(), pred.cpu().numpy()
+                for idx in range(pred.shape[0]):
+                    csv_writer.writerow([indices[idx], labels[idx], pred[idx]])
+        top1acc /= tot_train_points
+        if csv_file_name is not None:
+            save_csv_file.close()
+        self.teacher.train()
+        return top1acc
+            
+
 class Experiment:
     """
     Class to set up and run MeanTeacher experiments
     """
+    
+    def __init__(self):
+        self.trainer = MeanTeacher()
+    
     def run(self):
         """Run the experiment with the specified parameters"""
-        pass
-    
-    
+        self.trainer.train()
+
+
 if __name__ == "__main__":
     exp = Experiment()
     exp.run()

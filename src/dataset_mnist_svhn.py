@@ -130,11 +130,19 @@ def online_mean_and_sd(loader):
 
 if __name__ == "__main__":
     tr = transforms.Compose([transforms.Resize(32),
+                             transforms.Grayscale(3),
                              transforms.ToTensor(),
                              transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)
                              ])
-    dataset = DatasetSVHN(root="../data/", train=True, hypertune=True, transform=tr)
+    dataset = DatasetMNIST(root="../data/", train=True, hypertune=True, transform=tr)
     print(len(dataset))
-    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4)
-    # print(online_mean_and_sd(dataloader))
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4)
+    count = [0] * 10
+    for idx, images, labels in dataloader:
+        for label in labels:
+            count[label] += 1
+    print(count)
+    total = sum(count)
+    count = [cnt/total for cnt in count]
+    print(count)
     
