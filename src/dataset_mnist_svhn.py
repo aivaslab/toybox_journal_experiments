@@ -26,7 +26,7 @@ class DatasetMNIST(torchdata.Dataset):
         self.hypertune = hypertune
         
         if self.hypertune:
-            self.dataset = datasets.MNIST(root=self.root, train=True, transform=self.transform)
+            self.dataset = datasets.MNIST(root=self.root, train=True, transform=self.transform, download=True)
             rng = np.random.default_rng(seed=42)
             all_images = len(self.dataset)
             all_indices = np.arange(all_images)
@@ -34,7 +34,7 @@ class DatasetMNIST(torchdata.Dataset):
             self.train_indices = rng.choice(all_indices, train_num, replace=False)
             self.test_indices = [i for i in all_indices if i not in self.train_indices]
         else:
-            self.dataset = datasets.MNIST(root=self.root, train=self.train, transform=self.transform)
+            self.dataset = datasets.MNIST(root=self.root, train=self.train, transform=self.transform, download=True)
             
     def __getitem__(self, item):
         if self.hypertune:
@@ -74,7 +74,7 @@ class DatasetSVHN(torchdata.Dataset):
             self.split = 'test'
         
         if self.hypertune:
-            self.dataset = datasets.SVHN(root=self.root, split=self.split, transform=self.transform)
+            self.dataset = datasets.SVHN(root=self.root, split=self.split, transform=self.transform, download=True)
             rng = np.random.default_rng(seed=42)
             all_images = len(self.dataset)
             all_indices = np.arange(all_images)
@@ -82,7 +82,7 @@ class DatasetSVHN(torchdata.Dataset):
             self.train_indices = rng.choice(all_indices, train_num, replace=False)
             self.test_indices = [i for i in all_indices if i not in self.train_indices]
         else:
-            self.dataset = datasets.SVHN(root=self.root, split=self.split, transform=self.transform)
+            self.dataset = datasets.SVHN(root=self.root, split=self.split, transform=self.transform, download=True)
     
     def __getitem__(self, item):
         if self.hypertune:
