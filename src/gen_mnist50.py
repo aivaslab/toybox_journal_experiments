@@ -54,8 +54,9 @@ def split_mnist(path="../data/", train_images_per_class=50, val_images_per_class
     for idx in val_indices:
         assert idx not in train_indices
     print(images.dtype)
+    print(labels[0].dtype)
     train_images = np.zeros((len(train_indices), 28, 28), dtype=np.uint8)
-    train_labels = np.ones(len(train_indices)) * -1
+    train_labels = np.ones(len(train_indices), dtype=int) * -1
     for i, img_idx in enumerate(train_indices):
         img = images[img_idx]
         lbl = labels[img_idx]
@@ -67,7 +68,7 @@ def split_mnist(path="../data/", train_images_per_class=50, val_images_per_class
     np.save(train_labels_out_file, train_labels)
 
     val_images = np.zeros((len(val_indices), 28, 28), dtype=np.uint8)
-    val_labels = np.ones(len(val_indices)) * -1
+    val_labels = np.ones(len(val_indices), dtype=int) * -1
     for i, img_idx in enumerate(val_indices):
         img = images[img_idx]
         lbl = labels[img_idx]
@@ -112,7 +113,9 @@ def display_ims(digit, train=True):
 
 
 if __name__ == "__main__":
-    # split_mnist(train_images_per_class=50)
-    for i in range(10):
-        display_ims(i, train=False)
+    split_mnist(train_images_per_class=50)
+    for d in range(10):
+        display_ims(d, train=False)
+    for d in range(10):
+        display_ims(d, train=True)
     

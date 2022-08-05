@@ -16,7 +16,7 @@ import pickle
 
 import utils
 import mean_teacher
-import dataset_mnist_svhn
+import dataset_mnist50
 
 OUTPUT_DIR = "../out/MNIST_SUP/"
 RUNS_DIR = "../runs/MNIST_SUP/"
@@ -79,26 +79,26 @@ class NNTrainer:
         
         self.net = Network(network_file_name=network_file)
         self.train_transform = transforms.Compose([
-            # transforms.ToPILImage(),
+            transforms.ToPILImage(),
             transforms.Grayscale(3),
-            # transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8),
+            transforms.RandomInvert(p=0.5),
+            transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)),
+            transforms.RandomHorizontalFlip(p=0.5),
             transforms.Resize(32),
             transforms.ToTensor(),
             transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
         ])
         
         self.test_transform = transforms.Compose([
-            # transforms.ToPILImage(),
+            transforms.ToPILImage(),
             transforms.Grayscale(3),
             transforms.Resize(32),
             transforms.ToTensor(),
             transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
         ])
         
-        self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=self.hypertune,
-                                                             transform=self.train_transform)
-        self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=self.hypertune,
-                                                            transform=self.test_transform)
+        self.dataset_train = dataset_mnist50.DatasetMNIST50(root="../data/", train=True, transform=self.train_transform)
+        self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False, transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
@@ -130,12 +130,11 @@ class NNTrainer:
         """
         Train the model
         """
-        
-        optimizer = self.prepare_model_for_run()
         self.net.network = self.net.network.cuda()
         if self.epochs == 0:
             # No training required if number of epochs is 0
             return
+        optimizer = self.prepare_model_for_run()
         
         total_params = sum(p.numel() for p in self.net.network.parameters())
         train_params = sum(p.numel() for p in self.net.network.parameters() if p.requires_grad)
@@ -235,12 +234,14 @@ class NNTrainer:
             epoch_acc_file.close()
         else:
             acc = self.eval_model()
+        train_acc = self.eval_model(training=True)
+        self.logger.info("Final accuracy on train set: {:.2f}".format(train_acc))
         self.logger.info("Final accuracy on test set: {:.2f}".format(acc))
         
         print(batch_accs)
         print(epoch_accs)
     
-    def eval_model(self, csv_file_name=None):
+    def eval_model(self, csv_file_name=None, training=False):
         """
         This method calculates the accuracies on the provided
         dataloader for the current model defined by backbone
@@ -257,9 +258,12 @@ class NNTrainer:
             save_csv_file = open(csv_file_name, "w")
             csv_writer = csv.writer(save_csv_file)
             csv_writer.writerow(["Index", "True Label", "Predicted Label"])
-        
+        if training:
+            loader = self.train_loader
+        else:
+            loader = self.test_loader
         # Iterate over batches and calculate top-1 accuracy
-        for _, (indices,  images, labels) in enumerate(self.test_loader):
+        for _, (indices,  images, labels) in enumerate(loader):
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
             if len(images.size()) == 5:
@@ -312,6 +316,8 @@ class Experiment:
         Run the experiment
         """
         self.trainer.train()
+        acc = self.trainer.eval_model()
+        print("Final test accuracy:{:.2f}".format(acc))
 
 
 def get_parser():
