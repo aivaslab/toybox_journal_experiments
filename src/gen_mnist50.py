@@ -1,5 +1,5 @@
 """
-Dataset class for MNIST-50
+Generate images for mnist-50
 """
 import torchvision.transforms as transforms
 import torch.utils.data
