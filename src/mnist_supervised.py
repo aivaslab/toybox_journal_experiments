@@ -59,13 +59,34 @@ class Network(nn.Module):
         return logits
 
 
+def get_transform(idx):
+    """Return the train_transform"""
+    tr = transforms.Compose([transforms.ToPILImage(),
+                             transforms.Grayscale(3),
+                             ])
+    if idx > 0:
+        tr.transforms.append(transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)))
+    if idx > 1:
+        tr.transforms.append(transforms.RandomInvert(p=0.5))
+    if idx > 2:
+        tr.transforms.append(transforms.RandomHorizontalFlip(p=0.5))
+    if idx > 3:
+        tr.transforms.append(transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4))
+    
+    tr.transforms.append(transforms.Resize(32))
+    tr.transforms.append(transforms.ToTensor())
+    tr.transforms.append(transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD))
+    
+    return tr
+
+    
 class NNTrainer:
     """
     Train the model and run eval periodically with specified data
     """
     
     def __init__(self, network_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000, lr=0.01):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4):
         self.network_file = network_file
         self.fraction = fraction
         self.hypertune = hypertune
@@ -76,33 +97,19 @@ class NNTrainer:
         self.log_test_error = log_test_error
         self.save_frequency = save_frequency
         self.save_frequency_batch = save_frequency_batch
+        self.transform = transform
         
         self.net = Network(network_file_name=network_file)
-        self.train_transform = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Grayscale(3),
-            transforms.RandomInvert(p=0.5),
-            transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.Resize(32),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
-        ])
         
-        self.test_transform = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Grayscale(3),
-            transforms.Resize(32),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
-        ])
-        
+        self.train_transform = get_transform(idx=self.transform)
+        self.test_transform = get_transform(idx=0)
+        print(self.train_transform)
+        print(self.test_transform)
         self.dataset_train = dataset_mnist50.DatasetMNIST50(root="../data/", train=True, transform=self.train_transform)
         self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False, transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
-        
         self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=False,
                                                 persistent_workers=True, pin_memory=True)
     
@@ -305,6 +312,7 @@ class Experiment:
                                  lr=self.exp_args['lr'],
                                  logr=logger,
                                  hypertune=not self.exp_args['final'],
+                                 transform=self.exp_args['transform'],
                                  save=self.exp_args['save'],
                                  log_test_error=self.exp_args['log_test_error'],
                                  save_frequency=self.exp_args['save_frequency'],
@@ -333,6 +341,7 @@ def get_parser():
     parser.add_argument("--log-level", "-ll", default="info", type=str)
     parser.add_argument("--save-frequency", "-sf", default=100, type=int)
     parser.add_argument("--save-frequency-batch", "-sfb", default=10000, type=int)
+    parser.add_argument("--transform", "-t", default=5, type=int)
     return parser.parse_args()
 
 
