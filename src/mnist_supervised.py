@@ -17,6 +17,7 @@ import pickle
 import utils
 import mean_teacher
 import dataset_mnist50
+import network_mnist_svhn
 
 OUTPUT_DIR = "../out/MNIST_SUP/"
 RUNS_DIR = "../runs/MNIST_SUP/"
@@ -46,7 +47,7 @@ class Network(nn.Module):
     def __init__(self, network_file_name):
         super().__init__()
         self.network_file_name = network_file_name
-        self.network = mean_teacher.Network(n_classes=10)
+        self.network = network_mnist_svhn.Network(n_classes=10)
         if os.path.isfile(self.network_file_name):
             print("Loading backbone from {}".format(self.network_file_name))
             self.network.load_state_dict(torch.load(self.network_file_name))
@@ -86,7 +87,7 @@ class NNTrainer:
     """
     
     def __init__(self, network_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4, layers_frozen=0):
         self.network_file = network_file
         self.fraction = fraction
         self.hypertune = hypertune
@@ -98,13 +99,12 @@ class NNTrainer:
         self.save_frequency = save_frequency
         self.save_frequency_batch = save_frequency_batch
         self.transform = transform
+        self.layers_frozen = layers_frozen
         
         self.net = Network(network_file_name=network_file)
         
         self.train_transform = get_transform(idx=self.transform)
         self.test_transform = get_transform(idx=0)
-        print(self.train_transform)
-        print(self.test_transform)
         self.dataset_train = dataset_mnist50.DatasetMNIST50(root="../data/", train=True, transform=self.train_transform)
         self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False, transform=self.test_transform)
         
@@ -113,7 +113,7 @@ class NNTrainer:
         self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=False,
                                                 persistent_workers=True, pin_memory=True)
     
-    def prepare_model_for_run(self):
+    def prepare_model_for_run(self, frozen_layers=0):
         """
         This method prepares the backbone and classifier for a training run.
         """
@@ -123,13 +123,15 @@ class NNTrainer:
         # Set train() for network components. Only matters for regularization
         # techniques like dropout and batchnorm.
         # Set optimizer and add which weights are to be optimized acc. to config.
-        for params in self.net.network.parameters():
-            params.requires_grad = True
-        for params in self.net.network.fc4.parameters():
+        all_params = self.net.network.get_params(frozen_layers=0)
+        trainable_params = self.net.network.get_params(frozen_layers=frozen_layers)
+        for params in all_params:
+            params.requires_grad = False
+        for params in trainable_params:
             params.requires_grad = True
             
         self.net.network.train()
-        optimizer = torch.optim.SGD(self.net.network.parameters(), lr=self.lr, momentum=0.9, weight_decay=1e-5)
+        optimizer = torch.optim.SGD(trainable_params, lr=self.lr, momentum=0.9, weight_decay=1e-5)
         
         return optimizer
     
@@ -141,7 +143,7 @@ class NNTrainer:
         if self.epochs == 0:
             # No training required if number of epochs is 0
             return
-        optimizer = self.prepare_model_for_run()
+        optimizer = self.prepare_model_for_run(frozen_layers=self.layers_frozen)
         
         total_params = sum(p.numel() for p in self.net.network.parameters())
         train_params = sum(p.numel() for p in self.net.network.parameters() if p.requires_grad)
@@ -311,6 +313,7 @@ class Experiment:
                                  epochs=self.exp_args['epochs'],
                                  lr=self.exp_args['lr'],
                                  logr=logger,
+                                 layers_frozen=self.exp_args['layers_frozen'],
                                  hypertune=not self.exp_args['final'],
                                  transform=self.exp_args['transform'],
                                  save=self.exp_args['save'],
@@ -342,6 +345,7 @@ def get_parser():
     parser.add_argument("--save-frequency", "-sf", default=100, type=int)
     parser.add_argument("--save-frequency-batch", "-sfb", default=10000, type=int)
     parser.add_argument("--transform", "-t", default=5, type=int)
+    parser.add_argument("--layers-frozen", "-lf", default=0, type=int)
     return parser.parse_args()
 
 
