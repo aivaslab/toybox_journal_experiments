@@ -18,6 +18,7 @@ import pickle
 import utils
 import mean_teacher
 import dataset_mnist_svhn
+import network_mnist_svhn
 
 OUTPUT_DIR = "../out/SVHN_SUP/"
 RUNS_DIR = "../runs/SVHN_SUP/"
@@ -47,7 +48,7 @@ class Network(nn.Module):
     def __init__(self, network_file_name):
         super().__init__()
         self.network_file_name = network_file_name
-        self.network = mean_teacher.Network(n_classes=10)
+        self.network = network_mnist_svhn.Network(n_classes=10)
         if os.path.isfile(self.network_file_name):
             print("Loading backbone from {}".format(self.network_file_name))
             self.network.load_state_dict(torch.load(self.network_file_name))
@@ -60,13 +61,34 @@ class Network(nn.Module):
         return logits
 
 
+def get_transform(idx):
+    """Return the train_transform"""
+    tr = transforms.Compose([transforms.ToPILImage(),
+                             transforms.Grayscale(3),
+                             ])
+    if idx > 0:
+        tr.transforms.append(transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)))
+    if idx > 1:
+        tr.transforms.append(transforms.RandomInvert(p=0.5))
+    if idx > 2:
+        tr.transforms.append(transforms.RandomHorizontalFlip(p=0.5))
+    if idx > 3:
+        tr.transforms.append(transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4))
+    
+    tr.transforms.append(transforms.Resize(32))
+    tr.transforms.append(transforms.ToTensor())
+    tr.transforms.append(transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD))
+    
+    return tr
+
+
 class NNTrainer:
     """
     Train the model and run eval periodically with specified data
     """
     
     def __init__(self, network_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000, lr=0.01):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4, layers_frozen=0):
         self.network_file = network_file
         self.fraction = fraction
         self.hypertune = hypertune
@@ -77,22 +99,13 @@ class NNTrainer:
         self.log_test_error = log_test_error
         self.save_frequency = save_frequency
         self.save_frequency_batch = save_frequency_batch
+        self.transform = transform
+        self.layers_frozen = layers_frozen
         
         self.net = Network(network_file_name=network_file)
-        self.train_transform = transforms.Compose([
-            # transforms.ToPILImage(),
-            # transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8),
-            transforms.Resize(32),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)
-        ])
+        self.train_transform = get_transform(idx=self.transform)
         
-        self.test_transform = transforms.Compose([
-            # transforms.ToPILImage(),
-            transforms.Resize(32),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)
-        ])
+        self.test_transform = get_transform(idx=0)
         
         self.dataset_train = dataset_mnist_svhn.DatasetSVHN(root="../data/", train=True, hypertune=self.hypertune,
                                                             transform=self.train_transform)
@@ -130,11 +143,11 @@ class NNTrainer:
         Train the model
         """
         
-        optimizer = self.prepare_model_for_run()
         self.net.network = self.net.network.cuda()
         if self.epochs == 0:
             # No training required if number of epochs is 0
             return
+        optimizer = self.prepare_model_for_run()
         
         total_params = sum(p.numel() for p in self.net.network.parameters())
         train_params = sum(p.numel() for p in self.net.network.parameters() if p.requires_grad)
@@ -245,7 +258,7 @@ class NNTrainer:
         dataloader for the current model defined by backbone
         and classifier.
         """
-        self.net.network.eval()
+        # self.net.network.eval()
         top1acc = 0
         tot_train_points = 0
         
@@ -299,7 +312,9 @@ class Experiment:
                                  epochs=self.exp_args['epochs'],
                                  lr=self.exp_args['lr'],
                                  logr=logger,
+                                 layers_frozen=self.exp_args['layers_frozen'],
                                  hypertune=not self.exp_args['final'],
+                                 transform=self.exp_args['transform'],
                                  save=self.exp_args['save'],
                                  log_test_error=self.exp_args['log_test_error'],
                                  save_frequency=self.exp_args['save_frequency'],
@@ -311,6 +326,8 @@ class Experiment:
         Run the experiment
         """
         self.trainer.train()
+        acc = self.trainer.eval_model()
+        print("Final test accuracy: {:.2f}".format(acc))
 
 
 def get_parser():
@@ -326,6 +343,8 @@ def get_parser():
     parser.add_argument("--log-level", "-ll", default="info", type=str)
     parser.add_argument("--save-frequency", "-sf", default=100, type=int)
     parser.add_argument("--save-frequency-batch", "-sfb", default=10000, type=int)
+    parser.add_argument("--transform", "-t", default=5, type=int)
+    parser.add_argument("--layers-frozen", "-lf", default=0, type=int)
     return parser.parse_args()
 
 
