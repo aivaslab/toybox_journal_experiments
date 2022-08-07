@@ -118,7 +118,7 @@ class NNTrainer:
         self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=False,
                                                 persistent_workers=True, pin_memory=True)
     
-    def prepare_model_for_run(self):
+    def prepare_model_for_run(self, frozen_layers=0):
         """
         This method prepares the backbone and classifier for a training run.
         """
@@ -128,13 +128,15 @@ class NNTrainer:
         # Set train() for network components. Only matters for regularization
         # techniques like dropout and batchnorm.
         # Set optimizer and add which weights are to be optimized acc. to config.
-        for params in self.net.network.parameters():
+        all_params = self.net.network.get_params(frozen_layers=0)
+        trainable_params = self.net.network.get_params(frozen_layers=frozen_layers)
+        for params in all_params:
+            params.requires_grad = False
+        for params in trainable_params:
             params.requires_grad = True
-        for params in self.net.network.fc4.parameters():
-            params.requires_grad = True
-        
+            
         self.net.network.train()
-        optimizer = torch.optim.SGD(self.net.network.parameters(), lr=self.lr, momentum=0.9, weight_decay=1e-5)
+        optimizer = torch.optim.SGD(trainable_params, lr=self.lr, momentum=0.9, weight_decay=1e-5)
         
         return optimizer
     
@@ -147,7 +149,7 @@ class NNTrainer:
         if self.epochs == 0:
             # No training required if number of epochs is 0
             return
-        optimizer = self.prepare_model_for_run()
+        optimizer = self.prepare_model_for_run(frozen_layers=self.layers_frozen)
         
         total_params = sum(p.numel() for p in self.net.network.parameters())
         train_params = sum(p.numel() for p in self.net.network.parameters() if p.requires_grad)
@@ -247,21 +249,23 @@ class NNTrainer:
             epoch_acc_file.close()
         else:
             acc = self.eval_model()
+        train_acc = self.eval_model(training=True)
+        self.logger.info("Final accuracy on train set: {:.2f}".format(train_acc))
         self.logger.info("Final accuracy on test set: {:.2f}".format(acc))
         
         print(batch_accs)
         print(epoch_accs)
-    
-    def eval_model(self, csv_file_name=None):
+
+    def eval_model(self, csv_file_name=None, training=False):
         """
         This method calculates the accuracies on the provided
         dataloader for the current model defined by backbone
         and classifier.
         """
-        # self.net.network.eval()
+        self.net.network.eval()
         top1acc = 0
         tot_train_points = 0
-        
+    
         save_csv_file = None
         csv_writer = None
         if csv_file_name is not None:
@@ -269,9 +273,12 @@ class NNTrainer:
             save_csv_file = open(csv_file_name, "w")
             csv_writer = csv.writer(save_csv_file)
             csv_writer.writerow(["Index", "True Label", "Predicted Label"])
-        
+        if training:
+            loader = self.train_loader
+        else:
+            loader = self.test_loader
         # Iterate over batches and calculate top-1 accuracy
-        for _, (indices, images, labels) in enumerate(self.test_loader):
+        for _, (indices, images, labels) in enumerate(loader):
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
             if len(images.size()) == 5:
