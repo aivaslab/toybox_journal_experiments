@@ -16,7 +16,8 @@ import pickle
 
 import utils
 import mean_teacher
-import dataset_mnist_svhn
+import dataset_mnist50
+import network_mnist_svhn
 
 OUTPUT_DIR = "../out/MNIST_SUP/"
 RUNS_DIR = "../runs/MNIST_SUP/"
@@ -46,7 +47,7 @@ class Network(nn.Module):
     def __init__(self, network_file_name):
         super().__init__()
         self.network_file_name = network_file_name
-        self.network = mean_teacher.Network(n_classes=10)
+        self.network = network_mnist_svhn.Network(n_classes=10)
         if os.path.isfile(self.network_file_name):
             print("Loading backbone from {}".format(self.network_file_name))
             self.network.load_state_dict(torch.load(self.network_file_name))
@@ -59,13 +60,34 @@ class Network(nn.Module):
         return logits
 
 
+def get_transform(idx):
+    """Return the train_transform"""
+    tr = transforms.Compose([transforms.ToPILImage(),
+                             transforms.Grayscale(3),
+                             ])
+    if idx > 0:
+        tr.transforms.append(transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)))
+    if idx > 1:
+        tr.transforms.append(transforms.RandomInvert(p=0.5))
+    if idx > 2:
+        tr.transforms.append(transforms.RandomHorizontalFlip(p=0.5))
+    if idx > 3:
+        tr.transforms.append(transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4))
+    
+    tr.transforms.append(transforms.Resize(32))
+    tr.transforms.append(transforms.ToTensor())
+    tr.transforms.append(transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD))
+    
+    return tr
+
+    
 class NNTrainer:
     """
     Train the model and run eval periodically with specified data
     """
     
     def __init__(self, network_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000, lr=0.01):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4, layers_frozen=0):
         self.network_file = network_file
         self.fraction = fraction
         self.hypertune = hypertune
@@ -76,37 +98,22 @@ class NNTrainer:
         self.log_test_error = log_test_error
         self.save_frequency = save_frequency
         self.save_frequency_batch = save_frequency_batch
+        self.transform = transform
+        self.layers_frozen = layers_frozen
         
         self.net = Network(network_file_name=network_file)
-        self.train_transform = transforms.Compose([
-            # transforms.ToPILImage(),
-            transforms.Grayscale(3),
-            # transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8),
-            transforms.Resize(32),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
-        ])
         
-        self.test_transform = transforms.Compose([
-            # transforms.ToPILImage(),
-            transforms.Grayscale(3),
-            transforms.Resize(32),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
-        ])
-        
-        self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=self.hypertune,
-                                                             transform=self.train_transform)
-        self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=self.hypertune,
-                                                            transform=self.test_transform)
+        self.train_transform = get_transform(idx=self.transform)
+        self.test_transform = get_transform(idx=0)
+        self.dataset_train = dataset_mnist50.DatasetMNIST50(root="../data/", train=True, transform=self.train_transform)
+        self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False, transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
-        
         self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=False,
                                                 persistent_workers=True, pin_memory=True)
     
-    def prepare_model_for_run(self):
+    def prepare_model_for_run(self, frozen_layers=0):
         """
         This method prepares the backbone and classifier for a training run.
         """
@@ -116,13 +123,15 @@ class NNTrainer:
         # Set train() for network components. Only matters for regularization
         # techniques like dropout and batchnorm.
         # Set optimizer and add which weights are to be optimized acc. to config.
-        for params in self.net.network.parameters():
-            params.requires_grad = True
-        for params in self.net.network.fc4.parameters():
+        all_params = self.net.network.get_params(frozen_layers=0)
+        trainable_params = self.net.network.get_params(frozen_layers=frozen_layers)
+        for params in all_params:
+            params.requires_grad = False
+        for params in trainable_params:
             params.requires_grad = True
             
         self.net.network.train()
-        optimizer = torch.optim.SGD(self.net.network.parameters(), lr=self.lr, momentum=0.9, weight_decay=1e-5)
+        optimizer = torch.optim.SGD(trainable_params, lr=self.lr, momentum=0.9, weight_decay=1e-5)
         
         return optimizer
     
@@ -130,12 +139,11 @@ class NNTrainer:
         """
         Train the model
         """
-        
-        optimizer = self.prepare_model_for_run()
         self.net.network = self.net.network.cuda()
         if self.epochs == 0:
             # No training required if number of epochs is 0
             return
+        optimizer = self.prepare_model_for_run(frozen_layers=self.layers_frozen)
         
         total_params = sum(p.numel() for p in self.net.network.parameters())
         train_params = sum(p.numel() for p in self.net.network.parameters() if p.requires_grad)
@@ -235,12 +243,14 @@ class NNTrainer:
             epoch_acc_file.close()
         else:
             acc = self.eval_model()
+        train_acc = self.eval_model(training=True)
+        self.logger.info("Final accuracy on train set: {:.2f}".format(train_acc))
         self.logger.info("Final accuracy on test set: {:.2f}".format(acc))
         
         print(batch_accs)
         print(epoch_accs)
     
-    def eval_model(self, csv_file_name=None):
+    def eval_model(self, csv_file_name=None, training=False):
         """
         This method calculates the accuracies on the provided
         dataloader for the current model defined by backbone
@@ -257,9 +267,12 @@ class NNTrainer:
             save_csv_file = open(csv_file_name, "w")
             csv_writer = csv.writer(save_csv_file)
             csv_writer.writerow(["Index", "True Label", "Predicted Label"])
-        
+        if training:
+            loader = self.train_loader
+        else:
+            loader = self.test_loader
         # Iterate over batches and calculate top-1 accuracy
-        for _, (indices,  images, labels) in enumerate(self.test_loader):
+        for _, (indices,  images, labels) in enumerate(loader):
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
             if len(images.size()) == 5:
@@ -300,7 +313,9 @@ class Experiment:
                                  epochs=self.exp_args['epochs'],
                                  lr=self.exp_args['lr'],
                                  logr=logger,
+                                 layers_frozen=self.exp_args['layers_frozen'],
                                  hypertune=not self.exp_args['final'],
+                                 transform=self.exp_args['transform'],
                                  save=self.exp_args['save'],
                                  log_test_error=self.exp_args['log_test_error'],
                                  save_frequency=self.exp_args['save_frequency'],
@@ -312,6 +327,8 @@ class Experiment:
         Run the experiment
         """
         self.trainer.train()
+        acc = self.trainer.eval_model()
+        print("Final test accuracy:{:.2f}".format(acc))
 
 
 def get_parser():
@@ -327,6 +344,8 @@ def get_parser():
     parser.add_argument("--log-level", "-ll", default="info", type=str)
     parser.add_argument("--save-frequency", "-sf", default=100, type=int)
     parser.add_argument("--save-frequency-batch", "-sfb", default=10000, type=int)
+    parser.add_argument("--transform", "-t", default=5, type=int)
+    parser.add_argument("--layers-frozen", "-lf", default=0, type=int)
     return parser.parse_args()
 
 
