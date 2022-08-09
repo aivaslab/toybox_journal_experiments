@@ -7,7 +7,6 @@ import torchvision.transforms as transforms
 import torch
 import numpy as np
 
-
 MNIST_MEAN = (0.1309, 0.1309, 0.1309)
 MNIST_STD = (0.2893, 0.2893, 0.2893)
 SVHN_MEAN = (0.4377, 0.4438, 0.4728)
@@ -18,6 +17,7 @@ class DatasetMNIST(torchdata.Dataset):
     """
     Dataset class for MNIST
     """
+    
     def __init__(self, root, train, transform, hypertune=True):
         super(DatasetMNIST, self).__init__()
         self.root = root
@@ -35,7 +35,7 @@ class DatasetMNIST(torchdata.Dataset):
             self.test_indices = [i for i in all_indices if i not in self.train_indices]
         else:
             self.dataset = datasets.MNIST(root=self.root, train=self.train, transform=self.transform, download=True)
-            
+    
     def __getitem__(self, item):
         if self.hypertune:
             if self.train:
@@ -113,7 +113,7 @@ def online_mean_and_sd(loader):
     cnt = 0
     fst_moment = torch.empty(3)
     snd_moment = torch.empty(3)
-
+    
     for _, data, _ in loader:
         # print(data.shape)
         b, c, h, w = data.shape
@@ -122,27 +122,57 @@ def online_mean_and_sd(loader):
         sum_of_square = torch.sum(data ** 2, dim=[0, 2, 3])
         fst_moment = (cnt * fst_moment + sum_) / (cnt + nb_pixels)
         snd_moment = (cnt * snd_moment + sum_of_square) / (cnt + nb_pixels)
-
+        
         cnt += nb_pixels
-
+    
     return fst_moment, torch.sqrt(snd_moment - fst_moment ** 2)
 
 
 if __name__ == "__main__":
-    tr = transforms.Compose([transforms.Resize(32),
-                             transforms.Grayscale(3),
+    tr = transforms.Compose([transforms.Grayscale(3), transforms.Pad(2),
                              transforms.ToTensor(),
-                             transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)
+                             transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
+                             # transforms.ToTensor(),
+                             # transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)
                              ])
     dataset = DatasetMNIST(root="../data/", train=True, hypertune=True, transform=tr)
     print(len(dataset))
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4)
-    count = [0] * 10
-    for idx, images, labels in dataloader:
-        for label in labels:
-            count[label] += 1
-    print(count)
-    total = sum(count)
-    count = [cnt/total for cnt in count]
-    print(count)
+    # print(online_mean_and_sd(dataloader))
+    import visda_aug
     
+    hflip = False
+    xlat_range = 2
+    affine_std = 0.1
+    intens_scale_range_lower = 0.25
+    intens_scale_range_upper = 0.5
+    intens_offset_range_lower = -0.5
+    intens_offset_range_upper = 0.5
+    intens_flip = True
+    gaussian_noise_std = 0.1
+
+    aug = visda_aug.ImageAugmentation(hflip, xlat_range, affine_std,
+                                      intens_scale_range_lower=intens_scale_range_lower,
+                                      intens_scale_range_upper=intens_scale_range_upper,
+                                      intens_offset_range_lower=intens_offset_range_lower,
+                                      intens_offset_range_upper=intens_offset_range_upper,
+                                      intens_flip=intens_flip, gaussian_noise_std=gaussian_noise_std)
+    
+    indices, images, labels = next(iter(dataloader))
+    print(images.shape)
+    images = aug.augment(images)
+    print(type(images), images.shape)
+    for idx in range(10):
+        img = images[idx]
+        unnorm = visda_aug.UnNormalize(mean=MNIST_MEAN, std=MNIST_STD)
+        img = unnorm(img)
+        img = transforms.ToPILImage()(img)
+        img.show()
+    # count = [0] * 10
+    # for idx, images, labels in dataloader:
+    #     for label in labels:
+    #         count[label] += 1
+    # print(count)
+    # total = sum(count)
+    # count = [cnt/total for cnt in count]
+    # print(count)
