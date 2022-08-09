@@ -75,7 +75,7 @@ class NNTrainer:
     """
     
     def __init__(self, backbone_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000, lr=0.01):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01, batch_size=128):
         self.backbone_file = backbone_file
         self.fraction = fraction
         self.hypertune = hypertune
@@ -83,6 +83,7 @@ class NNTrainer:
         self.save = save
         self.logger = logr
         self.lr = lr
+        self.batch_size = batch_size
         self.log_test_error = log_test_error
         self.save_frequency = save_frequency
         self.save_frequency_batch = save_frequency_batch
@@ -96,6 +97,26 @@ class NNTrainer:
             transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
         ])
 
+        prob = 0.2
+        color_transforms = [transforms.RandomApply([transforms.ColorJitter(brightness=0.2)], p=prob),
+                            transforms.RandomApply([transforms.ColorJitter(hue=0.2)], p=prob),
+                            transforms.RandomApply([transforms.ColorJitter(saturation=0.2)], p=prob),
+                            transforms.RandomApply([transforms.ColorJitter(contrast=0.2)], p=prob),
+                            transforms.RandomEqualize(p=prob),
+                            transforms.RandomPosterize(bits=4, p=prob),
+                            transforms.RandomAutocontrast(p=prob)
+                            ]
+
+        trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.Resize((256, 256)),
+                                      transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
+                                                                   interpolation=transforms.InterpolationMode.BICUBIC),
+                                      transforms.RandomOrder(color_transforms),
+                                      transforms.RandomHorizontalFlip(p=0.5),
+                                      transforms.ToTensor(),
+                                      transforms.Normalize(IN12_MEAN, IN12_STD),
+                                      transforms.RandomErasing(p=0.5)])
+        # self.train_transform = trnsfrm
+
         self.test_transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize(224),
@@ -108,14 +129,14 @@ class NNTrainer:
                                                                   train=True, hypertune=self.hypertune,
                                                                   transform=self.train_transform)
         self.dataset_test = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, train=False,
-                                                                 hypertune=self.hypertune,
+                                                                 hypertune=False,
                                                                  transform=self.test_transform)
         
-        self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=128, num_workers=4, shuffle=True,
-                                                 persistent_workers=True, pin_memory=True)
+        self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=self.batch_size, num_workers=4,
+                                                 shuffle=True, persistent_workers=True, pin_memory=True)
         
-        self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=False,
-                                                persistent_workers=True, pin_memory=True)
+        self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=self.batch_size, num_workers=4,
+                                                shuffle=False, persistent_workers=True, pin_memory=True)
 
     def prepare_model_for_run(self):
         """
@@ -329,7 +350,8 @@ class Experiment:
                                  save=self.exp_args['save'],
                                  log_test_error=self.exp_args['log_test_error'],
                                  save_frequency=self.exp_args['save_frequency'],
-                                 save_frequency_batch=self.exp_args['save_frequency_batch']
+                                 save_frequency_batch=self.exp_args['save_frequency_batch'],
+                                 batch_size=self.exp_args['batch']
                                  )
     
     def run(self):
@@ -342,6 +364,7 @@ class Experiment:
 def get_parser():
     """Generate parser for the experiments"""
     parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--batch", "-b", default=128, type=int)
     parser.add_argument("--backbone", "-bb", default="", type=str)
     parser.add_argument("--epochs", "-e", default=10, type=int)
     parser.add_argument("--fraction", "-f", default=0.5, type=float)
