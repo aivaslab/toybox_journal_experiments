@@ -198,13 +198,12 @@ class MeanTeacher:
         
         self.mnist_train_transform = transforms.Compose([transforms.Grayscale(3),
                                                          transforms.RandomInvert(p=0.5),
-                                                         transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)),
-                                                         transforms.RandomHorizontalFlip(p=0.5),
-                                                         transforms.Resize(32),
+                                                         transforms.RandomAffine(degrees=10, translate=(0.1, 0.1)),
+                                                         transforms.ColorJitter(brightness=0.4, contrast=0.2),
+                                                         transforms.Pad(2),
                                                          transforms.ToTensor(),
                                                          transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)])
         self.svhn_train_transform = transforms.Compose([transforms.Resize(32),
-                                                        transforms.RandomHorizontalFlip(p=0.5),
                                                         transforms.ToTensor(),
                                                         transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)])
         
@@ -213,9 +212,9 @@ class MeanTeacher:
         self.target_dataset = dataset_mnist_svhn.DatasetSVHN(root="../data/", train=True, hypertune=True,
                                                              transform=self.svhn_train_transform)
         self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=256, shuffle=True, num_workers=4,
-                                                  pin_memory=True, persistent_workers=True)
+                                                  pin_memory=True, persistent_workers=False)
         self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=256, shuffle=True, num_workers=4,
-                                                  pin_memory=True, persistent_workers=True)
+                                                  pin_memory=True, persistent_workers=False)
     
     def update_teacher(self, alpha=0.99):
         """EMA update for the teacher's weights"""
@@ -245,11 +244,11 @@ class MeanTeacher:
         print(
             "{}/{} parameters in the teacher network are trainable".format(teacher_params_train, teacher_params_total))
         
-        optimizer = torch.optim.Adam(self.student.parameters(), lr=0.01)
-        num_epochs = 5
+        optimizer = torch.optim.Adam(self.student.parameters(), lr=0.001)
+        num_epochs = 200
         target_loader_iter = iter(self.target_loader)
         for epoch in range(1, num_epochs + 1):
-            tqdm_bar = tqdm.tqdm(self.source_loader)
+            tqdm_bar = tqdm.tqdm(self.source_loader, ncols=150)
             for indices, images, labels in tqdm_bar:
                 try:
                     indices2, images2, labels2 = next(target_loader_iter)
@@ -279,10 +278,11 @@ class MeanTeacher:
                                          format(epoch, num_epochs, cls_loss.item(), self_loss.item(),
                                                 loss.item(), optimizer.param_groups[0]['lr']))
             tqdm_bar.close()
-            acc = self.eval_model(training=True)
-            print("Source accuracy:{:.2f}".format(acc))
-            acc = self.eval_model(training=False)
-            print("Target accuracy:{:.2f}".format(acc))
+            if epoch % 5 == 0:
+                acc = self.eval_model(training=True)
+                print("Source accuracy:{:.2f}".format(acc))
+                acc = self.eval_model(training=False)
+                print("Target accuracy:{:.2f}".format(acc))
 
     def eval_model(self, training=False, csv_file_name=None):
         """
