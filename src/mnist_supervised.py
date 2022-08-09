@@ -17,7 +17,9 @@ import pickle
 import utils
 import mean_teacher
 import dataset_mnist50
+import dataset_mnist_svhn
 import network_mnist_svhn
+import visda_aug
 
 OUTPUT_DIR = "../out/MNIST_SUP/"
 RUNS_DIR = "../runs/MNIST_SUP/"
@@ -47,7 +49,7 @@ class Network(nn.Module):
     def __init__(self, network_file_name):
         super().__init__()
         self.network_file_name = network_file_name
-        self.network = network_mnist_svhn.Network(n_classes=10)
+        self.network = network_mnist_svhn.Network2(n_classes=10)
         if os.path.isfile(self.network_file_name):
             print("Loading backbone from {}".format(self.network_file_name))
             self.network.load_state_dict(torch.load(self.network_file_name))
@@ -60,21 +62,23 @@ class Network(nn.Module):
         return logits
 
 
-def get_transform(idx):
+def get_transform(idx, mnist50=False):
     """Return the train_transform"""
-    tr = transforms.Compose([transforms.ToPILImage(),
-                             transforms.Grayscale(3),
-                             ])
+    if mnist50:
+        tr = transforms.Compose([transforms.ToPILImage(),
+                                 transforms.Grayscale(3),
+                                 ])
+    else:
+        tr = transforms.Compose([transforms.Grayscale(3),
+                                 ])
     if idx > 0:
         tr.transforms.append(transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)))
     if idx > 1:
         tr.transforms.append(transforms.RandomInvert(p=0.5))
     if idx > 2:
-        tr.transforms.append(transforms.RandomHorizontalFlip(p=0.5))
-    if idx > 3:
-        tr.transforms.append(transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4))
+        tr.transforms.append(transforms.ColorJitter(brightness=0.4, contrast=0.4))
     
-    tr.transforms.append(transforms.Resize(32))
+    tr.transforms.append(transforms.Pad(2))
     tr.transforms.append(transforms.ToTensor())
     tr.transforms.append(transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD))
     
@@ -103,10 +107,14 @@ class NNTrainer:
         
         self.net = Network(network_file_name=network_file)
         
-        self.train_transform = get_transform(idx=self.transform)
+        self.train_transform = get_transform(idx=0)
         self.test_transform = get_transform(idx=0)
         self.dataset_train = dataset_mnist50.DatasetMNIST50(root="../data/", train=True, transform=self.train_transform)
         self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False, transform=self.test_transform)
+        self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=True,
+                                                             transform=self.train_transform)
+        self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=True,
+                                                            transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
@@ -166,12 +174,14 @@ class NNTrainer:
         tb_writer = tb.SummaryWriter(log_dir=RUNS_DIR + dt_now + "/")
         batch_accs = {}
         epoch_accs = {}
+        mnist_aug = visda_aug.get_aug_for_mnist()
         for epoch in range(1, num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.train_loader)
             batch_counter = 0
             total_loss = 0.0
             for idxs, images, labels in tqdm_bar:
                 # Move data to GPU
+                images = mnist_aug.augment(images)
                 images = images.cuda(0)
                 labels = labels.cuda(0)
                 optimizer.zero_grad()
