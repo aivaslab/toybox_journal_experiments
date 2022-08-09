@@ -11,6 +11,7 @@ import csv
 
 import dataset_mnist_svhn
 import utils
+import visda_aug
 
 MNIST_MEAN = (0.1309, 0.1309, 0.1309)
 MNIST_STD = (0.2893, 0.2893, 0.2893)
@@ -197,9 +198,9 @@ class MeanTeacher:
         self.teacher = Network(n_classes=10)
         
         self.mnist_train_transform = transforms.Compose([transforms.Grayscale(3),
-                                                         transforms.RandomInvert(p=0.5),
-                                                         transforms.RandomAffine(degrees=10, translate=(0.1, 0.1)),
-                                                         transforms.ColorJitter(brightness=0.4, contrast=0.2),
+                                                         # transforms.RandomInvert(p=0.5),
+                                                         # transforms.RandomAffine(degrees=10, translate=(0.1, 0.1)),
+                                                         # transforms.ColorJitter(brightness=0.4, contrast=0.2),
                                                          transforms.Pad(2),
                                                          transforms.ToTensor(),
                                                          transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)])
@@ -245,7 +246,8 @@ class MeanTeacher:
             "{}/{} parameters in the teacher network are trainable".format(teacher_params_train, teacher_params_total))
         
         optimizer = torch.optim.Adam(self.student.parameters(), lr=0.001)
-        num_epochs = 200
+        num_epochs = 1
+        aug = visda_aug.get_aug_for_mnist()
         target_loader_iter = iter(self.target_loader)
         for epoch in range(1, num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.source_loader, ncols=150)
@@ -257,15 +259,17 @@ class MeanTeacher:
                     indices2, images2, labels2 = next(target_loader_iter)
                 
                 optimizer.zero_grad()
+                images = aug.augment(images)
                 images, labels = images.cuda(), labels.cuda()
-                images2 = images2.cuda()
+                images2_1, images2_2 = aug.augment_pair(images2)
+                images2_1, images2_2 = images2_1.cuda(), images2_2.cuda()
                 
                 preds = self.student.forward(images)
                 cls_loss = nn.CrossEntropyLoss()(preds, labels)
                 
-                target_logits_student = torch.softmax(self.student.forward(images2), dim=1)
+                target_logits_student = torch.softmax(self.student.forward(images2_1), dim=1)
                 with torch.no_grad():
-                    target_logits_teacher = torch.softmax(self.teacher.forward(images2), dim=1)
+                    target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
                 
                 self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
                 unsup_weight = 3.0

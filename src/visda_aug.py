@@ -200,6 +200,7 @@ class ImageAugmentation(object):
     
     def augment_pair(self, X):
         """aug"""
+        
         return self.augment(X), self.augment(X)
 
 
@@ -229,7 +230,7 @@ def get_aug_for_mnist():
     xlat_range = 2
     affine_std = 0.1
     intens_scale_range_lower = 0.25
-    intens_scale_range_upper = 0.5
+    intens_scale_range_upper = 1.5
     intens_offset_range_lower = -0.5
     intens_offset_range_upper = 0.5
     intens_flip = True
