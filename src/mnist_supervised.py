@@ -49,7 +49,8 @@ class Network(nn.Module):
     def __init__(self, network_file_name):
         super().__init__()
         self.network_file_name = network_file_name
-        self.network = network_mnist_svhn.Network2(n_classes=10)
+        self.network = network_mnist_svhn.Network(n_classes=10)
+        self.network.apply(utils.weights_init)
         if os.path.isfile(self.network_file_name):
             print("Loading backbone from {}".format(self.network_file_name))
             self.network.load_state_dict(torch.load(self.network_file_name))
@@ -91,7 +92,7 @@ class NNTrainer:
     """
     
     def __init__(self, network_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4, layers_frozen=0):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4, layers_frozen=0, mnist50=True):
         self.network_file = network_file
         self.fraction = fraction
         self.hypertune = hypertune
@@ -104,17 +105,23 @@ class NNTrainer:
         self.save_frequency_batch = save_frequency_batch
         self.transform = transform
         self.layers_frozen = layers_frozen
+        self.mnist50 = mnist50
         
         self.net = Network(network_file_name=network_file)
         
-        self.train_transform = get_transform(idx=0)
-        self.test_transform = get_transform(idx=0)
-        self.dataset_train = dataset_mnist50.DatasetMNIST50(root="../data/", train=True, transform=self.train_transform)
-        self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False, transform=self.test_transform)
-        self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=True,
-                                                             transform=self.train_transform)
-        self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=True,
-                                                            transform=self.test_transform)
+        self.train_transform = get_transform(idx=0, mnist50=self.mnist50)
+        self.test_transform = get_transform(idx=0, mnist50=self.mnist50)
+        
+        if self.mnist50:
+            self.dataset_train = dataset_mnist50.DatasetMNIST50(root="../data/", train=True,
+                                                                transform=self.train_transform)
+            self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False,
+                                                               transform=self.test_transform)
+        else:
+            self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=True,
+                                                                 transform=self.train_transform)
+            self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=True,
+                                                                transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
@@ -126,7 +133,6 @@ class NNTrainer:
         This method prepares the backbone and classifier for a training run.
         """
         
-        self.net.network.apply(utils.weights_init)
         # Set which weights will be updated according to config.
         # Set train() for network components. Only matters for regularization
         # techniques like dropout and batchnorm.
@@ -158,7 +164,8 @@ class NNTrainer:
         self.logger.info("{}/{} parameters in the backbone are trainable...".format(train_params, total_params))
         
         # Set lr scheduler for training experiment.
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=1.0)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                               T_max=(self.epochs - 2) * len(self.train_loader))
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01,
                                                              total_iters=2 * len(self.train_loader) - 1)
         
@@ -329,7 +336,8 @@ class Experiment:
                                  save=self.exp_args['save'],
                                  log_test_error=self.exp_args['log_test_error'],
                                  save_frequency=self.exp_args['save_frequency'],
-                                 save_frequency_batch=self.exp_args['save_frequency_batch']
+                                 save_frequency_batch=self.exp_args['save_frequency_batch'],
+                                 mnist50=not self.exp_args['mnist']
                                  )
     
     def run(self):
@@ -356,6 +364,7 @@ def get_parser():
     parser.add_argument("--save-frequency-batch", "-sfb", default=10000, type=int)
     parser.add_argument("--transform", "-t", default=5, type=int)
     parser.add_argument("--layers-frozen", "-lf", default=0, type=int)
+    parser.add_argument("--mnist", default=False, action='store_true')
     return parser.parse_args()
 
 
