@@ -16,9 +16,8 @@ import argparse
 import pickle
 
 import utils
-import mean_teacher
-import dataset_mnist_svhn
 import network_mnist_svhn
+import dataset_svhn_balanced
 
 OUTPUT_DIR = "../out/SVHN_SUP/"
 RUNS_DIR = "../runs/SVHN_SUP/"
@@ -63,19 +62,16 @@ class Network(nn.Module):
 
 def get_transform(idx):
     """Return the train_transform"""
-    tr = transforms.Compose([transforms.ToPILImage(),
-                             transforms.Grayscale(3),
+    tr = transforms.Compose([  # transforms.ToPILImage(),
+                             transforms.Resize(32),
                              ])
     if idx > 0:
         tr.transforms.append(transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)))
     if idx > 1:
         tr.transforms.append(transforms.RandomInvert(p=0.5))
     if idx > 2:
-        tr.transforms.append(transforms.RandomHorizontalFlip(p=0.5))
-    if idx > 3:
         tr.transforms.append(transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4))
     
-    tr.transforms.append(transforms.Resize(32))
     tr.transforms.append(transforms.ToTensor())
     tr.transforms.append(transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD))
     
@@ -107,10 +103,10 @@ class NNTrainer:
         
         self.test_transform = get_transform(idx=0)
         
-        self.dataset_train = dataset_mnist_svhn.DatasetSVHN(root="../data/", train=True, hypertune=self.hypertune,
-                                                            transform=self.train_transform)
-        self.dataset_test = dataset_mnist_svhn.DatasetSVHN(root="../data/", train=False, hypertune=self.hypertune,
-                                                           transform=self.test_transform)
+        self.dataset_train = dataset_svhn_balanced.BalancedSVHN(root="../data/", train=True, hypertune=self.hypertune,
+                                                                transform=self.train_transform)
+        self.dataset_test = dataset_svhn_balanced.BalancedSVHN(root="../data/", train=False, hypertune=self.hypertune,
+                                                               transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
                                                  persistent_workers=True, pin_memory=True)
@@ -123,7 +119,6 @@ class NNTrainer:
         This method prepares the backbone and classifier for a training run.
         """
         
-        self.net.network.apply(utils.weights_init)
         # Set which weights will be updated according to config.
         # Set train() for network components. Only matters for regularization
         # techniques like dropout and batchnorm.
@@ -156,7 +151,7 @@ class NNTrainer:
         self.logger.info("{}/{} parameters in the backbone are trainable...".format(train_params, total_params))
         
         # Set lr scheduler for training experiment.
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=1.0)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(self.epochs-2)*len(self.train_loader))
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01,
                                                              total_iters=2 * len(self.train_loader) - 1)
         
