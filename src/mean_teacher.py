@@ -8,11 +8,14 @@ import tqdm
 import torch.utils.data as torchdata
 import torch.nn.functional as functional
 import csv
+import argparse
 
 import dataset_mnist_svhn
 import utils
 import visda_aug
 import network_mnist_svhn
+import dataset_mnist50
+import dataset_svhn_balanced
 
 MNIST_MEAN = (0.1309, 0.1309, 0.1309)
 MNIST_STD = (0.2893, 0.2893, 0.2893)
@@ -72,12 +75,11 @@ class MeanTeacher:
     """
     Module for implementing the mean teacher architecture
     """
-    
     def __init__(self):
         self.student = network_mnist_svhn.Network(n_classes=10)
         self.teacher = network_mnist_svhn.Network(n_classes=10)
         self.teacher.load_state_dict(self.student.state_dict())
-        self.mnist_train_transform = transforms.Compose([transforms.Grayscale(3),
+        self.mnist_train_transform = transforms.Compose([transforms.ToPILImage(), transforms.Grayscale(3),
                                                          # transforms.RandomInvert(p=0.5),
                                                          # transforms.RandomAffine(degrees=10, translate=(0.1, 0.1)),
                                                          # transforms.ColorJitter(brightness=0.4, contrast=0.2),
@@ -88,10 +90,10 @@ class MeanTeacher:
                                                         transforms.ToTensor(),
                                                         transforms.Normalize(mean=SVHN_MEAN, std=SVHN_STD)])
         
-        self.source_dataset = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=True,
-                                                              transform=self.mnist_train_transform)
-        self.target_dataset = dataset_mnist_svhn.DatasetSVHN(root="../data/", train=True, hypertune=True,
-                                                             transform=self.svhn_train_transform)
+        self.source_dataset = dataset_mnist50.DatasetMNIST50(root="../data/", train=True,
+                                                             transform=self.mnist_train_transform)
+        self.target_dataset = dataset_svhn_balanced.BalancedSVHN(root="../data/", train=True, hypertune=True,
+                                                                 transform=self.svhn_train_transform)
         self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=256, shuffle=True, num_workers=4,
                                                   pin_memory=True, persistent_workers=False)
         self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=256, shuffle=True, num_workers=4,
@@ -103,7 +105,7 @@ class MeanTeacher:
             current_weight, moving_weight = current_params.data, moving_params.data
             current_params.data = current_weight * alpha + moving_weight * (1 - alpha)
     
-    def train(self):
+    def train(self, train_args):
         """Train the network"""
         for params in self.student.parameters():
             params.requires_grad = True
@@ -125,18 +127,18 @@ class MeanTeacher:
         print(
             "{}/{} parameters in the teacher network are trainable".format(teacher_params_train, teacher_params_total))
         
-        optimizer = torch.optim.Adam(self.student.parameters(), lr=0.1)
-        num_epochs = 50
+        optimizer = torch.optim.Adam(self.student.parameters(), lr=train_args['lr'], weight_decay=1e-6)
+        num_epochs = train_args['epochs']
         aug = visda_aug.get_aug_for_mnist()
-        target_loader_iter = iter(self.target_loader)
+        source_loader_iter = iter(self.source_loader)
         for epoch in range(1, num_epochs + 1):
-            tqdm_bar = tqdm.tqdm(self.source_loader, ncols=150)
-            for indices, images, labels in tqdm_bar:
+            tqdm_bar = tqdm.tqdm(self.target_loader, ncols=150)
+            for indices2, images2, labels2 in tqdm_bar:
                 try:
-                    indices2, images2, labels2 = next(target_loader_iter)
+                    indices, images, labels = next(source_loader_iter)
                 except StopIteration:
-                    target_loader_iter = iter(self.target_loader)
-                    indices2, images2, labels2 = next(target_loader_iter)
+                    source_loader_iter = iter(self.source_loader)
+                    indices, images, labels = next(source_loader_iter)
                 
                 optimizer.zero_grad()
                 images = aug.augment(images)
@@ -225,11 +227,24 @@ class Experiment:
     def __init__(self):
         self.trainer = MeanTeacher()
     
-    def run(self):
+    def run(self, exp_args):
         """Run the experiment with the specified parameters"""
-        self.trainer.train()
+        self.trainer.train(train_args=exp_args)
+        source_acc = self.trainer.eval_model(training=True)
+        target_acc = self.trainer.eval_model(training=False)
+        print("Source Accuracy: {:.2f}".format(source_acc))
+        print("Target Accuracy: {:.2f}".format(target_acc))
+
+
+def get_parser():
+    """Parser with arguments for experiment"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", "-e", default=100, type=int)
+    parser.add_argument("--lr", "-lr", default=0.1, type=float)
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
     exp = Experiment()
-    exp.run()
+    args = vars(get_parser())
+    exp.run(exp_args=args)
