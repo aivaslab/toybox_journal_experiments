@@ -128,6 +128,8 @@ class MeanTeacher:
             "{}/{} parameters in the teacher network are trainable".format(teacher_params_train, teacher_params_total))
         
         optimizer = torch.optim.Adam(self.student.parameters(), lr=train_args['lr'], weight_decay=1e-6)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,
+                                                               T_max=train_args['epochs'] * len(self.target_loader))
         num_epochs = train_args['epochs']
         aug = visda_aug.get_aug_for_mnist()
         source_loader_iter = iter(self.source_loader)
@@ -159,7 +161,7 @@ class MeanTeacher:
                 loss.backward()
                 optimizer.step()
                 self.update_teacher()
-                
+                scheduler.step()
                 tqdm_bar.set_description("Epoch: {}/{}  CLS Loss: {:.4f}  SELF Loss: {:.4f}  Total: {:.4f}  LR: {:.4f}".
                                          format(epoch, num_epochs, cls_loss.item(), self_loss.item(),
                                                 loss.item(), optimizer.param_groups[0]['lr']))
@@ -169,7 +171,6 @@ class MeanTeacher:
                 print("Source accuracy:{:.2f}".format(acc))
                 acc = self.eval_model(training=False)
                 print("Target accuracy:{:.2f}".format(acc))
-                optimizer.param_groups[0]['lr'] *= 0.8
 
     def eval_model(self, training=False, csv_file_name=None):
         """
