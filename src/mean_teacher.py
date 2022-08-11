@@ -196,7 +196,7 @@ class MeanTeacher:
     def __init__(self):
         self.student = Network(n_classes=10)
         self.teacher = Network(n_classes=10)
-        
+        self.teacher.load_state_dict(self.student.state_dict())
         self.mnist_train_transform = transforms.Compose([transforms.Grayscale(3),
                                                          # transforms.RandomInvert(p=0.5),
                                                          # transforms.RandomAffine(degrees=10, translate=(0.1, 0.1)),
@@ -245,8 +245,8 @@ class MeanTeacher:
         print(
             "{}/{} parameters in the teacher network are trainable".format(teacher_params_train, teacher_params_total))
         
-        optimizer = torch.optim.Adam(self.student.parameters(), lr=0.001)
-        num_epochs = 1
+        optimizer = torch.optim.Adam(self.student.parameters(), lr=0.1)
+        num_epochs = 50
         aug = visda_aug.get_aug_for_mnist()
         target_loader_iter = iter(self.target_loader)
         for epoch in range(1, num_epochs + 1):
@@ -282,11 +282,12 @@ class MeanTeacher:
                                          format(epoch, num_epochs, cls_loss.item(), self_loss.item(),
                                                 loss.item(), optimizer.param_groups[0]['lr']))
             tqdm_bar.close()
-            if epoch % 5 == 0:
+            if epoch % 10 == 0:
                 acc = self.eval_model(training=True)
                 print("Source accuracy:{:.2f}".format(acc))
                 acc = self.eval_model(training=False)
                 print("Target accuracy:{:.2f}".format(acc))
+                optimizer.param_groups[0]['lr'] *= 0.8
 
     def eval_model(self, training=False, csv_file_name=None):
         """
