@@ -35,7 +35,7 @@ class Network(nn.Module):
         self.backbone.apply(utils.weights_init)
         self.fc_size = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
-        self.classifier = nn.Sequential(nn.Linear(self.fc_size, self.fc_size), nn.ReLU(), nn.Linear(self.fc_size, 12))
+        self.classifier = nn.Linear(self.fc_size, 12)
         self.classifier.apply(utils.weights_init)
         
     def forward(self, x):
