@@ -108,9 +108,11 @@ class MeanTeacher:
     Module for implementing the mean teacher architecture
     """
     
-    def __init__(self):
-        self.student = Network(pretrained=False)
-        self.teacher = Network(pretrained=False)
+    def __init__(self, teacher_for_eval=True, pretrained=False):
+        self.teacher_for_eval = teacher_for_eval
+        self.pretrained = pretrained
+        self.student = Network(pretrained=self.pretrained)
+        self.teacher = Network(pretrained=self.pretrained)
         self.teacher.backbone.load_state_dict(self.student.backbone.state_dict())
         self.teacher.classifier.load_state_dict(self.student.classifier.state_dict())
         self.tb_train_transform = self.get_train_transform(mean=TOYBOX_MEAN, std=TOYBOX_STD)
@@ -270,7 +272,11 @@ class MeanTeacher:
         dataloader for the current model defined by backbone
         and classifier.
         """
-        self.teacher.set_eval_mode()
+        if self.teacher_for_eval:
+            eval_net = self.teacher
+        else:
+            eval_net = self.student
+        eval_net.set_eval_mode()
         
         top1acc = 0
         tot_train_points = 0
@@ -296,7 +302,7 @@ class MeanTeacher:
                 b_size, c, h, w = images.size()
                 n_crops = 1
             with torch.no_grad():
-                logits = self.teacher.forward(images)
+                logits = eval_net.forward(images)
                 logits_avg = logits.view(b_size, n_crops, -1).mean(dim=1)
             top, pred = utils.calc_accuracy(logits_avg, labels, topk=(1,))
             top1acc += top[0].item() * pred.shape[0]
@@ -308,7 +314,7 @@ class MeanTeacher:
         top1acc /= tot_train_points
         if csv_file_name is not None:
             save_csv_file.close()
-        self.teacher.set_train_mode()
+        eval_net.set_train_mode()
         return top1acc
 
 
@@ -317,12 +323,14 @@ class Experiment:
     Class to set up and run MeanTeacher experiments
     """
     
-    def __init__(self):
-        self.trainer = MeanTeacher()
+    def __init__(self, exp_args):
+        self.exp_args = exp_args
+        self.trainer = MeanTeacher(teacher_for_eval=not self.exp_args['student_eval'],
+                                   pretrained=self.exp_args['pretrained'])
     
-    def run(self, exp_args):
+    def run(self):
         """Run the experiment with the specified parameters"""
-        self.trainer.train(train_args=exp_args)
+        self.trainer.train(train_args=self.exp_args)
         source_acc = self.trainer.eval_model(training=True)
         target_acc = self.trainer.eval_model(training=False)
         print("Source Accuracy: {:.2f}".format(source_acc))
@@ -334,10 +342,13 @@ def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", "-e", default=100, type=int)
     parser.add_argument("--lr", "-lr", default=0.1, type=float)
+    parser.add_argument("--student-eval", "-student", default=False, action='store_true')
+    parser.add_argument("--pretrained", "-p", default=False, action='store_true')
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    exp = Experiment()
     args = vars(get_parser())
-    exp.run(exp_args=args)
+    print(args)
+    exp = Experiment(exp_args=args)
+    exp.run()
