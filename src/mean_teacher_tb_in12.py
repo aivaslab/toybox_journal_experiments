@@ -234,7 +234,7 @@ class MeanTeacher:
                                                                    milestones=[2 * len(self.target_loader) - 1])
         
         num_epochs = train_args['epochs']
-        source_loader_iter = iter(self.source_loader)
+        source_loader_iter = iter(self.target_loader)
         total_batches = 0
         rampup_epochs = 10
         rampup_batches = rampup_epochs * len(self.target_loader)
@@ -363,7 +363,8 @@ class Experiment:
     def __init__(self, exp_args):
         self.exp_args = exp_args
         self.trainer = MeanTeacher(teacher_for_eval=not self.exp_args['student_eval'],
-                                   pretrained=self.exp_args['pretrained'])
+                                   pretrained=self.exp_args['pretrained'],
+                                   batch_size=self.exp_args['batch_size'])
     
     def run(self):
         """Run the experiment with the specified parameters"""
