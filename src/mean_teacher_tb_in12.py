@@ -108,9 +108,10 @@ class MeanTeacher:
     Module for implementing the mean teacher architecture
     """
     
-    def __init__(self, teacher_for_eval=True, pretrained=False):
+    def __init__(self, teacher_for_eval=True, pretrained=False, batch_size=64):
         self.teacher_for_eval = teacher_for_eval
         self.pretrained = pretrained
+        self.b_size = batch_size
         self.student = Network(pretrained=self.pretrained)
         self.teacher = Network(pretrained=self.pretrained)
         self.teacher.backbone.load_state_dict(self.student.backbone.state_dict())
@@ -129,12 +130,12 @@ class MeanTeacher:
         self.target_dataset_sup = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=0.2,
                                                                        transform=self.in12_test_transform)
         
-        self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=64, shuffle=True, num_workers=2,
-                                                  pin_memory=True, persistent_workers=False)
-        self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=64, shuffle=True, num_workers=2,
-                                                  pin_memory=True, persistent_workers=False)
+        self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=self.b_size, shuffle=True,
+                                                  num_workers=2, pin_memory=True, persistent_workers=False)
+        self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=self.b_size, shuffle=True,
+                                                  num_workers=2, pin_memory=True, persistent_workers=False)
         
-        self.target_loader_sup = torchdata.DataLoader(self.target_dataset_sup, batch_size=64, shuffle=True,
+        self.target_loader_sup = torchdata.DataLoader(self.target_dataset_sup, batch_size=self.b_size, shuffle=True,
                                                       num_workers=2, pin_memory=True, persistent_workers=False)
     
     @staticmethod
@@ -219,7 +220,7 @@ class MeanTeacher:
         print(
             "{}/{} parameters in the teacher network are trainable".format(teacher_params_train, teacher_params_total))
         
-        optimizer = torch.optim.Adam(self.student.backbone.parameters(), lr=train_args['lr'], weight_decay=1e-6)
+        optimizer = torch.optim.Adam(self.student.backbone.parameters(), lr=train_args['lr'], weight_decay=1e-7)
         optimizer.add_param_group({'params': self.student.classifier.parameters()})
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,
                                                                T_max=(train_args['epochs'] - 2)*len(self.target_loader),
@@ -250,12 +251,14 @@ class MeanTeacher:
                 # print(images.shape, images2_1.shape, images2_2.shape)
                 optimizer.zero_grad()
                 images, labels = images.cuda(), labels.cuda()
+                len_images = len(images)
                 images2_1, images2_2 = images2_1.cuda(), images2_2.cuda()
-                
-                preds = self.student.forward(images)
+                student_input = torch.cat([images, images2_1], dim=0)
+                student_output = self.student.forward(student_input)
+                preds = student_output[:len_images]
                 cls_loss = nn.CrossEntropyLoss()(preds, labels)
                 
-                target_logits_student = torch.softmax(self.student.forward(images2_1), dim=1)
+                target_logits_student = torch.softmax(student_output[len_images:], dim=1)
                 with torch.no_grad():
                     target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
                 
@@ -333,9 +336,11 @@ class MeanTeacher:
             else:
                 b_size, c, h, w = images.size()
                 n_crops = 1
+            
             with torch.no_grad():
                 logits = eval_net.forward(images)
                 logits_avg = logits.view(b_size, n_crops, -1).mean(dim=1)
+            
             top, pred = utils.calc_accuracy(logits_avg, labels, topk=(1,))
             top1acc += top[0].item() * pred.shape[0]
             tot_train_points += pred.shape[0]
@@ -383,6 +388,7 @@ def get_parser():
     parser.add_argument("--lr", "-lr", default=0.1, type=float)
     parser.add_argument("--student-eval", "-student", default=False, action='store_true')
     parser.add_argument("--pretrained", "-p", default=False, action='store_true')
+    parser.add_argument("--batch-size", "-b", default=64, type=int)
     return parser.parse_args()
 
 
