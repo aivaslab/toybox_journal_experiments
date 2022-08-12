@@ -234,7 +234,7 @@ class MeanTeacher:
                                                                    milestones=[2 * len(self.target_loader) - 1])
         
         num_epochs = train_args['epochs']
-        source_loader_iter = iter(self.target_loader)
+        source_loader_iter = iter(self.source_loader)
         total_batches = 0
         rampup_epochs = 10
         rampup_batches = rampup_epochs * len(self.target_loader)
