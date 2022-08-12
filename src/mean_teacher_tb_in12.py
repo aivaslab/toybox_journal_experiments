@@ -223,6 +223,9 @@ class MeanTeacher:
                                                                T_max=train_args['epochs'] * len(self.target_loader))
         num_epochs = train_args['epochs']
         source_loader_iter = iter(self.source_loader)
+        total_batches = 0
+        rampup_epochs = 10
+        rampup_batches = rampup_epochs * len(self.target_loader)
         for epoch in range(1, num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.target_loader, ncols=150)
             batches = 0
@@ -247,18 +250,22 @@ class MeanTeacher:
                 
                 # self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
                 self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
-                unsup_weight = 1.0
+                if epoch > rampup_epochs:
+                    unsup_weight = 3.0
+                else:
+                    unsup_weight = 3.0 * total_batches / rampup_batches
                 loss = cls_loss + self_loss * unsup_weight
                 batches += 1
+                total_batches += 1
                 total_loss += cls_loss.item()
                 loss.backward()
                 optimizer.step()
                 self.update_teacher()
                 scheduler.step()
                 tqdm_bar.set_description("Epoch: {}/{}  Ave Loss:  {:.4f}  CLS Loss: {:.4f}  SELF Loss: {:.4f}  "
-                                         "Total: {:.4f}  LR: {:.4f}".
+                                         "Total: {:.4f}  LR: {:.4f}, w: {:.3f}".
                                          format(epoch, num_epochs, total_loss/batches, cls_loss.item(), self_loss.item(),
-                                                loss.item(), optimizer.param_groups[0]['lr']))
+                                                loss.item(), optimizer.param_groups[0]['lr'], unsup_weight))
             tqdm_bar.close()
             if epoch % 10 == 0:
                 acc = self.eval_model(training=True)
