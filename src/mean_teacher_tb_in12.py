@@ -37,7 +37,7 @@ class Network(nn.Module):
         self.backbone.fc = nn.Identity()
         self.classifier = nn.Linear(self.fc_size, 12)
         self.classifier.apply(utils.weights_init)
-        
+    
     def forward(self, x):
         """forward for module"""
         feats = self.backbone(x)
@@ -48,13 +48,13 @@ class Network(nn.Module):
         """set network in train mode"""
         self.backbone.train()
         self.classifier.train()
-        
+    
     def set_eval_mode(self):
         """set network in eval mode"""
         self.backbone.eval()
         self.classifier.eval()
-        
-    
+
+
 def robust_binary_crossentropy(pred, tgt):
     """sdf"""
     inv_tgt = -tgt + 1.0
@@ -115,27 +115,28 @@ class MeanTeacher:
         self.teacher = Network(pretrained=self.pretrained)
         self.teacher.backbone.load_state_dict(self.student.backbone.state_dict())
         self.teacher.classifier.load_state_dict(self.student.classifier.state_dict())
+        
         self.tb_train_transform = self.get_train_transform(mean=TOYBOX_MEAN, std=TOYBOX_STD)
         self.in12_train_transform = self.get_train_transform(mean=IN12_MEAN, std=IN12_STD)
         self.in12_test_transform = self.get_test_transform(mean=IN12_MEAN, std=IN12_STD, ten_crop=False)
         
         self.source_dataset = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, train=True, hypertune=True,
                                                            transform=self.tb_train_transform, num_instances=-1,
-                                                           num_images_per_class=2000, rng=np.random.default_rng(0)
+                                                           num_images_per_class=4000, rng=np.random.default_rng(0)
                                                            )
-        self.target_dataset = dataset_ssl_in12.DatasetIN12(fraction=1.0, hypertune=True,
+        self.target_dataset = dataset_ssl_in12.DatasetIN12(fraction=0.4, hypertune=True,
                                                            transform=self.in12_train_transform)
-        self.target_dataset_sup = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=1.0,
+        self.target_dataset_sup = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=0.2,
                                                                        transform=self.in12_test_transform)
         
         self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=64, shuffle=True, num_workers=2,
                                                   pin_memory=True, persistent_workers=False)
         self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=64, shuffle=True, num_workers=2,
                                                   pin_memory=True, persistent_workers=False)
-
+        
         self.target_loader_sup = torchdata.DataLoader(self.target_dataset_sup, batch_size=64, shuffle=True,
                                                       num_workers=2, pin_memory=True, persistent_workers=False)
-
+    
     @staticmethod
     def get_train_transform(mean, std):
         """
@@ -150,7 +151,7 @@ class MeanTeacher:
                             transforms.RandomPosterize(bits=4, p=prob),
                             transforms.RandomAutocontrast(p=prob)
                             ]
-    
+        
         trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.Resize((256, 256)),
                                       transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0),
                                                                    interpolation=transforms.InterpolationMode.BICUBIC),
@@ -159,9 +160,9 @@ class MeanTeacher:
                                       transforms.ToTensor(),
                                       transforms.Normalize(mean, std),
                                       transforms.RandomErasing(p=0.5)])
-    
+        
         return trnsfrm
-
+    
     @staticmethod
     def get_test_transform(mean, std, ten_crop=True):
         """
@@ -177,15 +178,16 @@ class MeanTeacher:
         else:
             trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.Resize((224, 224)),
                                           transforms.ToTensor(), transforms.Normalize(mean, std)])
-    
+        
         return trnsfrm
     
     def update_teacher(self, alpha=0.99):
         """EMA update for the teacher's weights"""
-        for current_params, moving_params in zip(self.teacher.backbone.parameters(), self.student.backbone.parameters()):
+        for current_params, moving_params in zip(self.teacher.backbone.parameters(),
+                                                 self.student.backbone.parameters()):
             current_weight, moving_weight = current_params.data, moving_params.data
             current_params.data = current_weight * alpha + moving_weight * (1 - alpha)
-            
+        
         for current_params, moving_params in zip(self.teacher.classifier.parameters(),
                                                  self.student.classifier.parameters()):
             current_weight, moving_weight = current_params.data, moving_params.data
@@ -220,14 +222,23 @@ class MeanTeacher:
         optimizer = torch.optim.Adam(self.student.backbone.parameters(), lr=train_args['lr'], weight_decay=1e-6)
         optimizer.add_param_group({'params': self.student.classifier.parameters()})
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,
-                                                               T_max=train_args['epochs'] * len(self.target_loader))
+                                                               T_max=(train_args['epochs'] - 2)*len(self.target_loader),
+                                                               eta_min=0.01 * train_args['lr'])
+        
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01,
+                                                             total_iters=2 * len(self.target_loader) - 1)
+        
+        combined_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer=optimizer,
+                                                                   schedulers=[warmup_scheduler, scheduler],
+                                                                   milestones=[2 * len(self.target_loader) - 1])
+        
         num_epochs = train_args['epochs']
         source_loader_iter = iter(self.source_loader)
         total_batches = 0
         rampup_epochs = 10
         rampup_batches = rampup_epochs * len(self.target_loader)
         for epoch in range(1, num_epochs + 1):
-            tqdm_bar = tqdm.tqdm(self.target_loader, ncols=150)
+            tqdm_bar = tqdm.tqdm(self.target_loader, ncols=175)
             batches = 0
             total_loss = 0.0
             for indices2, (images2_1, images2_2) in tqdm_bar:
@@ -240,10 +251,10 @@ class MeanTeacher:
                 optimizer.zero_grad()
                 images, labels = images.cuda(), labels.cuda()
                 images2_1, images2_2 = images2_1.cuda(), images2_2.cuda()
-    
+                
                 preds = self.student.forward(images)
                 cls_loss = nn.CrossEntropyLoss()(preds, labels)
-    
+                
                 target_logits_student = torch.softmax(self.student.forward(images2_1), dim=1)
                 with torch.no_grad():
                     target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
@@ -251,27 +262,41 @@ class MeanTeacher:
                 # self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
                 self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
                 if epoch > rampup_epochs:
-                    unsup_weight = 3.0
+                    unsup_weight = 1.0
                 else:
-                    unsup_weight = 3.0 * total_batches / rampup_batches
+                    unsup_weight = 1.0 * total_batches / rampup_batches
                 loss = cls_loss + self_loss * unsup_weight
                 batches += 1
                 total_batches += 1
                 total_loss += cls_loss.item()
                 loss.backward()
                 optimizer.step()
-                self.update_teacher()
-                scheduler.step()
+                if epoch > rampup_epochs:
+                    alph = 0.999 + (total_batches - rampup_batches) * 0.00099 / ((num_epochs - rampup_epochs) *
+                                                                                 len(self.target_loader))
+                else:
+                    alph = 0.99 + total_batches / rampup_batches * 0.009
+                with torch.no_grad():
+                    self.update_teacher(alpha=alph)
+                combined_scheduler.step()
                 tqdm_bar.set_description("Epoch: {}/{}  Ave Loss:  {:.4f}  CLS Loss: {:.4f}  SELF Loss: {:.4f}  "
-                                         "Total: {:.4f}  LR: {:.4f}, w: {:.3f}".
-                                         format(epoch, num_epochs, total_loss/batches, cls_loss.item(), self_loss.item(),
-                                                loss.item(), optimizer.param_groups[0]['lr'], unsup_weight))
+                                         "Total: {:.4f}  LR: {:.4f}, w: {:.3f}  alpha: {:.4f}".
+                                         format(epoch, num_epochs, total_loss / batches, cls_loss.item(),
+                                                self_loss.item(), loss.item(), optimizer.param_groups[0]['lr'],
+                                                unsup_weight, alph))
             tqdm_bar.close()
             if epoch % 10 == 0:
+                self.teacher_for_eval = True
                 acc = self.eval_model(training=True)
-                print("Source accuracy:{:.2f}".format(acc))
+                print("Source accuracy with teacher:{:.2f}".format(acc))
                 acc = self.eval_model(training=False)
-                print("Target accuracy:{:.2f}".format(acc))
+                print("Target accuracy with teacher:{:.2f}".format(acc))
+                
+                self.teacher_for_eval = False
+                acc = self.eval_model(training=True)
+                print("Source accuracy with student:{:.2f}".format(acc))
+                acc = self.eval_model(training=False)
+                print("Target accuracy with student:{:.2f}".format(acc))
     
     def eval_model(self, training=False, csv_file_name=None):
         """
@@ -338,10 +363,17 @@ class Experiment:
     def run(self):
         """Run the experiment with the specified parameters"""
         self.trainer.train(train_args=self.exp_args)
+        self.trainer.teacher_for_eval = True
         source_acc = self.trainer.eval_model(training=True)
         target_acc = self.trainer.eval_model(training=False)
-        print("Source Accuracy: {:.2f}".format(source_acc))
-        print("Target Accuracy: {:.2f}".format(target_acc))
+        print("Source Accuracy with teacher: {:.2f}".format(source_acc))
+        print("Target Accuracy with teacher: {:.2f}".format(target_acc))
+        
+        self.trainer.teacher_for_eval = False
+        source_acc = self.trainer.eval_model(training=True)
+        target_acc = self.trainer.eval_model(training=False)
+        print("Source Accuracy with student: {:.2f}".format(source_acc))
+        print("Target Accuracy with student: {:.2f}".format(target_acc))
 
 
 def get_parser():
