@@ -92,7 +92,8 @@ class NNTrainer:
     """
     
     def __init__(self, network_file, fraction, epochs, logr, hypertune=True, save=False, log_test_error=False,
-                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4, layers_frozen=0, mnist50=True):
+                 save_frequency=100, save_frequency_batch=10000, lr=0.01, transform=4, layers_frozen=0, mnist50=True,
+                 batch_size=256):
         self.network_file = network_file
         self.fraction = fraction
         self.hypertune = hypertune
@@ -106,6 +107,7 @@ class NNTrainer:
         self.transform = transform
         self.layers_frozen = layers_frozen
         self.mnist50 = mnist50
+        self.b_size = batch_size
         
         self.net = Network(network_file_name=network_file)
         
@@ -123,8 +125,8 @@ class NNTrainer:
             self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=True,
                                                                 transform=self.test_transform)
         
-        self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=256, num_workers=4, shuffle=True,
-                                                 persistent_workers=True, pin_memory=True)
+        self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=self.b_size, num_workers=4,
+                                                 shuffle=True, persistent_workers=True, pin_memory=True)
         self.test_loader = torchdata.DataLoader(self.dataset_test, batch_size=128, num_workers=4, shuffle=False,
                                                 persistent_workers=True, pin_memory=True)
     
@@ -337,7 +339,8 @@ class Experiment:
                                  log_test_error=self.exp_args['log_test_error'],
                                  save_frequency=self.exp_args['save_frequency'],
                                  save_frequency_batch=self.exp_args['save_frequency_batch'],
-                                 mnist50=not self.exp_args['mnist']
+                                 mnist50=not self.exp_args['mnist'],
+                                 batch_size=self.exp_args['batch_size']
                                  )
     
     def run(self):
@@ -365,6 +368,7 @@ def get_parser():
     parser.add_argument("--transform", "-t", default=5, type=int)
     parser.add_argument("--layers-frozen", "-lf", default=0, type=int)
     parser.add_argument("--mnist", default=False, action='store_true')
+    parser.add_argument("--batch-size", "-b", default=256, type=int)
     return parser.parse_args()
 
 
