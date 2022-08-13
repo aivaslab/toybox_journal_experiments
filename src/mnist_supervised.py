@@ -120,9 +120,9 @@ class NNTrainer:
             self.dataset_test = dataset_mnist50.DatasetMNIST50(root="../data/", train=False,
                                                                transform=self.test_transform)
         else:
-            self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=True,
+            self.dataset_train = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=True, hypertune=self.hypertune,
                                                                  transform=self.train_transform)
-            self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=True,
+            self.dataset_test = dataset_mnist_svhn.DatasetMNIST(root="../data/", train=False, hypertune=self.hypertune,
                                                                 transform=self.test_transform)
         
         self.train_loader = torchdata.DataLoader(self.dataset_train, batch_size=self.b_size, num_workers=4,
