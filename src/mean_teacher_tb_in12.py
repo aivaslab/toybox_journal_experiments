@@ -25,11 +25,11 @@ TOYBOX_DATA_PATH = "../data_12/Toybox/"
 IN12_DATA_PATH = "../data_12/IN-12/"
 
 
-class Network(nn.Module):
+class NetworkMeanTeacher(nn.Module):
     """ResNet-18 backbone for toybox and in12 training"""
     
     def __init__(self, pretrained):
-        super(Network, self).__init__()
+        super(NetworkMeanTeacher, self).__init__()
         self.pretrained = pretrained
         self.backbone = models.resnet18(pretrained=self.pretrained)
         self.backbone.apply(utils.weights_init)
@@ -80,7 +80,7 @@ def compute_aug_loss(stu_out, tea_out):
     aug_loss = aug_loss * bal_scale[None, :]
     
     aug_loss = aug_loss.mean(dim=1)
-    n_classes = 10
+    n_classes = 12
     cls_bal_fn = robust_binary_crossentropy
     unsup_loss = (aug_loss * unsup_mask).mean()
     cls_balance = 0.05
@@ -112,8 +112,8 @@ class MeanTeacher:
         self.teacher_for_eval = teacher_for_eval
         self.pretrained = pretrained
         self.b_size = batch_size
-        self.student = Network(pretrained=self.pretrained)
-        self.teacher = Network(pretrained=self.pretrained)
+        self.student = NetworkMeanTeacher(pretrained=self.pretrained)
+        self.teacher = NetworkMeanTeacher(pretrained=self.pretrained)
         self.teacher.backbone.load_state_dict(self.student.backbone.state_dict())
         self.teacher.classifier.load_state_dict(self.student.classifier.state_dict())
         
@@ -125,6 +125,7 @@ class MeanTeacher:
                                                            transform=self.tb_train_transform, num_instances=-1,
                                                            num_images_per_class=4000, rng=np.random.default_rng(0)
                                                            )
+        
         self.target_dataset = dataset_ssl_in12.DatasetIN12(fraction=0.4, hypertune=True,
                                                            transform=self.in12_train_transform)
         self.target_dataset_sup = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=0.2,
@@ -236,7 +237,7 @@ class MeanTeacher:
         num_epochs = train_args['epochs']
         source_loader_iter = iter(self.source_loader)
         total_batches = 0
-        rampup_epochs = 10
+        rampup_epochs = train_args['rampup']
         rampup_batches = rampup_epochs * len(self.target_loader)
         for epoch in range(1, num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.target_loader, ncols=175)
@@ -262,8 +263,8 @@ class MeanTeacher:
                 with torch.no_grad():
                     target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
                 
-                # self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
-                self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
+                self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
+                # self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
                 if epoch > rampup_epochs:
                     unsup_weight = 1.0
                 else:
@@ -390,6 +391,7 @@ def get_parser():
     parser.add_argument("--student-eval", "-student", default=False, action='store_true')
     parser.add_argument("--pretrained", "-p", default=False, action='store_true')
     parser.add_argument("--batch-size", "-b", default=64, type=int)
+    parser.add_argument("--rampup", "-r", default=10, type=int)
     return parser.parse_args()
 
 
