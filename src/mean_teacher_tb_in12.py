@@ -262,9 +262,10 @@ class MeanTeacher:
                 target_logits_student = torch.softmax(student_output[len_images:], dim=1)
                 with torch.no_grad():
                     target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
-                
-                self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
-                # self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
+                if train_args['visda_loss']:
+                    self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
+                else:
+                    self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
                 if epoch > rampup_epochs:
                     unsup_weight = 1.0
                 else:
@@ -392,6 +393,7 @@ def get_parser():
     parser.add_argument("--pretrained", "-p", default=False, action='store_true')
     parser.add_argument("--batch-size", "-b", default=64, type=int)
     parser.add_argument("--rampup", "-r", default=10, type=int)
+    parser.add_argument("--visda-loss", default=False, action='store_true')
     return parser.parse_args()
 
 
