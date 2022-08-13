@@ -21,8 +21,8 @@ import dataset_mnist_svhn
 import network_mnist_svhn
 import visda_aug
 
-OUTPUT_DIR = "../out/MNIST_SUP/"
-RUNS_DIR = "../runs/MNIST_SUP/"
+OUTPUT_DIR = "../out/MNIST50_SUP/"
+RUNS_DIR = "../runs/MNIST50_SUP/"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(RUNS_DIR, exist_ok=True)
 
@@ -72,11 +72,11 @@ def get_transform(idx, mnist50=False):
     else:
         tr = transforms.Compose([transforms.Grayscale(3),
                                  ])
-    if idx > 0:
+    if idx > 10:
         tr.transforms.append(transforms.RandomAffine(degrees=5, translate=(0.1, 0.1)))
-    if idx > 1:
+    if idx > 11:
         tr.transforms.append(transforms.RandomInvert(p=0.5))
-    if idx > 2:
+    if idx > 12:
         tr.transforms.append(transforms.ColorJitter(brightness=0.4, contrast=0.4))
     
     tr.transforms.append(transforms.Pad(2))
@@ -145,7 +145,7 @@ class NNTrainer:
             params.requires_grad = True
             
         self.net.network.train()
-        optimizer = torch.optim.SGD(trainable_params, lr=self.lr, momentum=0.9, weight_decay=1e-5)
+        optimizer = torch.optim.Adam(trainable_params, lr=self.lr, weight_decay=1e-6)
         
         return optimizer
     
