@@ -9,6 +9,8 @@ import torchvision.models as models
 import csv
 import argparse
 import numpy as np
+import os
+import datetime
 
 import utils
 import dataset_toybox
@@ -23,6 +25,7 @@ ALL_DATASETS = ["Toybox", "IN12"]
 
 TOYBOX_DATA_PATH = "../data_12/Toybox/"
 IN12_DATA_PATH = "../data_12/IN-12/"
+OUT_DIR = "../out/MEAN_TEACHER_TB_IN12/"
 
 
 class NetworkMeanTeacher(nn.Module):
@@ -233,7 +236,7 @@ class MeanTeacher:
         combined_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer=optimizer,
                                                                    schedulers=[warmup_scheduler, scheduler],
                                                                    milestones=[2 * len(self.target_loader) - 1])
-        
+        dt_now = datetime.datetime.now().strftime("%b-%d-%Y-%H-%M")
         num_epochs = train_args['epochs']
         source_loader_iter = iter(self.source_loader)
         total_batches = 0
@@ -252,14 +255,18 @@ class MeanTeacher:
                 # print(images.shape, images2_1.shape, images2_2.shape)
                 optimizer.zero_grad()
                 images, labels = images.cuda(), labels.cuda()
-                len_images = len(images)
                 images2_1, images2_2 = images2_1.cuda(), images2_2.cuda()
-                student_input = torch.cat([images, images2_1], dim=0)
-                student_output = self.student.forward(student_input)
-                preds = student_output[:len_images]
-                cls_loss = nn.CrossEntropyLoss()(preds, labels)
+                if train_args['combined']:
+                    len_images = len(images)
+                    student_input = torch.cat([images, images2_1], dim=0)
+                    student_output = self.student.forward(student_input)
+                    preds = student_output[:len_images]
+                    target_logits_student = torch.softmax(student_output[len_images:], dim=1)
+                else:
+                    preds = self.student.forward(images)
+                    target_logits_student = torch.softmax(self.student.forward(images2_1), dim=1)
                 
-                target_logits_student = torch.softmax(student_output[len_images:], dim=1)
+                cls_loss = nn.CrossEntropyLoss()(preds, labels)
                 with torch.no_grad():
                     target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
                 if train_args['visda_loss']:
@@ -302,7 +309,25 @@ class MeanTeacher:
                 print("Source accuracy with student:{:.2f}".format(acc))
                 acc = self.eval_model(training=False)
                 print("Target accuracy with student:{:.2f}".format(acc))
-    
+                
+                os.makedirs(OUT_DIR + dt_now, exist_ok=True)
+                teacher_file_name = OUT_DIR + dt_now + "/teacher_epoch_" + str(epoch) + ".pt"
+                print("Saving teacher network to {}".format(teacher_file_name))
+                torch.save(self.teacher.state_dict(), teacher_file_name)
+
+                student_file_name = OUT_DIR + dt_now + "/student_epoch_" + str(epoch) + ".pt"
+                print("Saving student network to {}".format(student_file_name))
+                torch.save(self.student.state_dict(), student_file_name)
+        
+        os.makedirs(OUT_DIR + dt_now, exist_ok=True)
+        teacher_file_name = OUT_DIR + dt_now + "/teacher_final.pt"
+        print("Saving teacher network to {}".format(teacher_file_name))
+        torch.save(self.teacher.state_dict(), teacher_file_name)
+
+        student_file_name = OUT_DIR + dt_now + "/student_final.pt"
+        print("Saving student network to {}".format(student_file_name))
+        torch.save(self.student.state_dict(), student_file_name)
+
     def eval_model(self, training=False, csv_file_name=None):
         """
         This method calculates the accuracies on the provided
@@ -394,6 +419,7 @@ def get_parser():
     parser.add_argument("--batch-size", "-b", default=64, type=int)
     parser.add_argument("--rampup", "-r", default=10, type=int)
     parser.add_argument("--visda-loss", default=False, action='store_true')
+    parser.add_argument("--combined", "-c", default=False, action='store_true')
     return parser.parse_args()
 
 

@@ -151,20 +151,27 @@ class MeanTeacher:
                 except StopIteration:
                     source_loader_iter = iter(self.source_loader)
                     indices, images, labels = next(source_loader_iter)
-                
+    
                 optimizer.zero_grad()
                 images = aug.augment(images)
                 images, labels = images.cuda(), labels.cuda()
                 images2_1, images2_2 = aug.augment_pair(images2)
                 images2_1, images2_2 = images2_1.cuda(), images2_2.cuda()
-                
-                preds = self.student.forward(images)
-                cls_loss = nn.CrossEntropyLoss()(preds, labels)
-                
-                target_logits_student = torch.softmax(self.student.forward(images2_1), dim=1)
+    
+                if train_args['combined']:
+                    len_source = len(images)
+                    student_input = torch.cat([images, images2_1], dim=0)
+                    student_output = self.student.forward(student_input)
+                    preds = student_output[:len_source]
+                    target_logits_student = torch.softmax(student_output[len_source:], dim=1)
+                else:
+                    preds = self.student.forward(images)
+                    target_logits_student = torch.softmax(self.student.forward(images2_1), dim=1)
+               
                 with torch.no_grad():
                     target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
                 
+                cls_loss = nn.CrossEntropyLoss()(preds, labels)
                 self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
                 # self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
                 unsup_weight = 3.0
@@ -190,7 +197,7 @@ class MeanTeacher:
                 student_file_name = OUT_DIR + dt_now + "/student_epoch_" + str(epoch) + ".pt"
                 print("Saving student network to {}".format(student_file_name))
                 torch.save(self.student.state_dict(), student_file_name)
-
+        os.makedirs(OUT_DIR + dt_now, exist_ok=True)
         teacher_file_name = OUT_DIR + dt_now + "/teacher_final.pt"
         print("Saving teacher network to {}".format(teacher_file_name))
         torch.save(self.teacher.state_dict(), teacher_file_name)
@@ -269,6 +276,7 @@ def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", "-e", default=100, type=int)
     parser.add_argument("--lr", "-lr", default=0.1, type=float)
+    parser.add_argument("--combined", "-c", default=False, action='store_true')
     return parser.parse_args()
 
 
