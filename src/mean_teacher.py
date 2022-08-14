@@ -9,6 +9,9 @@ import torch.utils.data as torchdata
 import torch.nn.functional as functional
 import csv
 import argparse
+import datetime
+import os
+import torch.utils.tensorboard as tb
 
 import dataset_mnist_svhn
 import utils
@@ -21,6 +24,11 @@ MNIST_MEAN = (0.1309, 0.1309, 0.1309)
 MNIST_STD = (0.2893, 0.2893, 0.2893)
 SVHN_MEAN = (0.4377, 0.4438, 0.4728)
 SVHN_STD = (0.1980, 0.2010, 0.1970)
+
+OUT_DIR = "../out/MNIST50_SVHN_ENSEMBLE/"
+RUNS_DIR = "../runs/MNIST50_SVHN_ENSEMBLE/"
+os.makedirs(OUT_DIR, exist_ok=True)
+os.makedirs(RUNS_DIR, exist_ok=True)
 
 
 def robust_binary_crossentropy(pred, tgt):
@@ -133,6 +141,8 @@ class MeanTeacher:
         num_epochs = train_args['epochs']
         aug = visda_aug.get_aug_for_mnist()
         source_loader_iter = iter(self.source_loader)
+        dt_now = datetime.datetime.now().strftime("%b-%d-%Y-%H-%M")
+
         for epoch in range(1, num_epochs + 1):
             tqdm_bar = tqdm.tqdm(self.target_loader, ncols=150)
             for indices2, images2, labels2 in tqdm_bar:
@@ -156,6 +166,7 @@ class MeanTeacher:
                     target_logits_teacher = torch.softmax(self.teacher.forward(images2_2), dim=1)
                 
                 self_loss, _, _ = compute_aug_loss(target_logits_student, target_logits_teacher)
+                # self_loss = nn.MSELoss()(target_logits_student, target_logits_teacher)
                 unsup_weight = 3.0
                 loss = cls_loss + self_loss * unsup_weight
                 loss.backward()
@@ -171,6 +182,22 @@ class MeanTeacher:
                 print("Source accuracy:{:.2f}".format(acc))
                 acc = self.eval_model(training=False)
                 print("Target accuracy:{:.2f}".format(acc))
+                os.makedirs(OUT_DIR + dt_now, exist_ok=True)
+                teacher_file_name = OUT_DIR + dt_now + "/teacher_epoch_" + str(epoch) + ".pt"
+                print("Saving teacher network to {}".format(teacher_file_name))
+                torch.save(self.teacher.state_dict(), teacher_file_name)
+
+                student_file_name = OUT_DIR + dt_now + "/student_epoch_" + str(epoch) + ".pt"
+                print("Saving student network to {}".format(student_file_name))
+                torch.save(self.student.state_dict(), student_file_name)
+
+        teacher_file_name = OUT_DIR + dt_now + "/teacher_final.pt"
+        print("Saving teacher network to {}".format(teacher_file_name))
+        torch.save(self.teacher.state_dict(), teacher_file_name)
+
+        student_file_name = OUT_DIR + dt_now + "/student_final.pt"
+        print("Saving student network to {}".format(student_file_name))
+        torch.save(self.student.state_dict(), student_file_name)
 
     def eval_model(self, training=False, csv_file_name=None):
         """
