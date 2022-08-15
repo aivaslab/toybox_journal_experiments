@@ -297,7 +297,7 @@ class MeanTeacher:
                                                 self_loss.item(), loss.item(), optimizer.param_groups[0]['lr'],
                                                 unsup_weight, alph))
             tqdm_bar.close()
-            if epoch % 20 == 0:
+            if epoch % 40 == 0:
                 self.teacher_for_eval = True
                 acc = self.eval_model(training=True)
                 print("Source accuracy with teacher:{:.2f}".format(acc))
