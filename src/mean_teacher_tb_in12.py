@@ -126,12 +126,12 @@ class MeanTeacher:
         
         self.source_dataset = dataset_toybox.ToyboxDataset(root=TOYBOX_DATA_PATH, train=True, hypertune=True,
                                                            transform=self.tb_train_transform, num_instances=-1,
-                                                           num_images_per_class=4000, rng=np.random.default_rng(0)
+                                                           num_images_per_class=-1, rng=np.random.default_rng(0)
                                                            )
         
-        self.target_dataset = dataset_ssl_in12.DatasetIN12(fraction=0.4, hypertune=True,
+        self.target_dataset = dataset_ssl_in12.DatasetIN12(fraction=1.0, hypertune=True,
                                                            transform=self.in12_train_transform)
-        self.target_dataset_sup = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=0.2,
+        self.target_dataset_sup = dataset_imagenet12.DataLoaderGeneric(root=IN12_DATA_PATH, fraction=1.0,
                                                                        transform=self.in12_test_transform)
         
         self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=self.b_size, shuffle=True,
@@ -297,7 +297,7 @@ class MeanTeacher:
                                                 self_loss.item(), loss.item(), optimizer.param_groups[0]['lr'],
                                                 unsup_weight, alph))
             tqdm_bar.close()
-            if epoch % 10 == 0:
+            if epoch % 20 == 0:
                 self.teacher_for_eval = True
                 acc = self.eval_model(training=True)
                 print("Source accuracy with teacher:{:.2f}".format(acc))
