@@ -594,7 +594,8 @@ class Experiment:
             train_transform = self.get_train_transform(mean=IN12_MEAN, std=IN12_STD)
             train_data = parse_config.get_dataset(dataset_imagenet12, 'DataLoaderGeneric', root=IN12_DATA_PATH,
                                                   transform=train_transform, train=True, fraction=
-                                                  self.config_dict[comp]['args']['fraction'])
+                                                  self.config_dict[comp]['args']['fraction'],
+                                                  hypertune=self.config_dict['hypertune'])
             if self.config_dict[comp]['args']['log_test_error']:
                 self.set_testing_data(test_set='imagenet_test')
         else:
@@ -648,12 +649,14 @@ class Experiment:
                 self.test_loader_name = "imagenet_coco_train"
                 logger.debug("Loading imagenet+coco train set....")
                 test_data = parse_config.get_dataset(dataset_imagenet12, 'DataLoaderGeneric', train=True,
-                                                     root=IN12_DATA_PATH, transform=test_transform)
+                                                     root=IN12_DATA_PATH, transform=test_transform,
+                                                     hypertune=self.config_dict['hypertune'])
             else:
                 self.test_loader_name = "imagenet_coco_test"
                 logger.debug("Loading imagenet+coco test set....")
                 test_data = parse_config.get_dataset(dataset_imagenet12, 'DataLoaderGeneric', train=False,
-                                                     root=IN12_DATA_PATH, transform=test_transform)
+                                                     root=IN12_DATA_PATH, transform=test_transform,
+                                                     hypertune=self.config_dict['hypertune'])
         else:
             test_transform = self.get_test_transform(mean=CORE50_MEAN, std=CORE50_STD, ten_crop=ten_crop)
     
