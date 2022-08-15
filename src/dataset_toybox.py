@@ -25,9 +25,10 @@ class ToyboxDataset(torch.utils.data.Dataset):
     Class for loading Toybox data for classification. The user can specify the number of instances per class
     and the number of images per class. If number of images per class is -1, all images are selected.
     """
+    
     def __init__(self, root, rng, train=True, transform=None, size=224, hypertune=False, num_instances=-1,
                  num_images_per_class=-1, views=toybox_videos):
-    
+        
         self.data_path = root
         self.train = train
         self.transform = transform
@@ -56,9 +57,9 @@ class ToyboxDataset(torch.utils.data.Dataset):
             self.trainLabelsFile = self.data_path + "toybox_data_interpolated_cropped_train.csv"
             self.testImagesFile = self.data_path + "toybox_data_interpolated_cropped_test.pickle"
             self.testLabelsFile = self.data_path + "toybox_data_interpolated_cropped_test.csv"
-    
+        
         super().__init__()
-    
+        
         if self.train:
             self.indicesSelected = []
             with open(self.trainImagesFile, "rb") as pickleFile:
@@ -122,7 +123,7 @@ class ToyboxDataset(torch.utils.data.Dataset):
         self.logger.debug("Verified that all chosen images correspond to {} instances for each "
                           "class....".format(self.num_instances))
         self.logger.debug("Verified that all images selected come from the specified views...")
-            
+    
     def set_train_indices(self):
         """
         This method sets the training indices based on the settings provided in init().
@@ -149,7 +150,7 @@ class ToyboxDataset(torch.utils.data.Dataset):
         if self.num_images_per_class < 0:
             num_images_per_instance = [-1 for _ in range(self.num_instances)]
         else:
-            num_images_per_instance = [int(self.num_images_per_class/self.num_instances) for _ in
+            num_images_per_instance = [int(self.num_images_per_class / self.num_instances) for _ in
                                        range(self.num_instances)]
             remaining = max(0, self.num_images_per_class - num_images_per_instance[0] * self.num_instances)
             idx_instance = 0
@@ -196,11 +197,37 @@ class ToyboxDataset(torch.utils.data.Dataset):
                     self.indicesSelected.append(idx_row)
 
 
+class ToyboxSSL(torch.utils.data.Dataset):
+    """SSL loading dataset for toybox"""
+    
+    def __init__(self, root, rng, train=True, transform=None, size=224, hypertune=False, num_instances=-1,
+                 num_images_per_class=-1, views=toybox_videos):
+        self.dataset = ToyboxDataset(root=root, rng=rng, train=train, transform=None, size=size, hypertune=hypertune,
+                                     num_instances=num_instances, num_images_per_class=num_images_per_class,
+                                     views=views)
+        self.transform = transform
+        super().__init__()
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, item):
+        idx, img, label = self.dataset[item]
+        return idx, [self.transform(img), self.transform(img)]
+
+
 if __name__ == "__main__":
     trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.Resize((224, 224)),
-                                  transforms.ToTensor(),
-                                  transforms.Normalize(mean=mean, std=std)])
-    dataset = ToyboxDataset(root="../../toybox_unsupervised_learning/data/", transform=trnsfrm,
-                            rng=np.random.default_rng(0), hypertune=False, train=True, num_instances=10,
-                            num_images_per_class=1000, views=("ryminus", "ryplus"))
+                                  transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4),
+                                  transforms.RandomHorizontalFlip()
+                                  # transforms.ToTensor(),
+                                  # transforms.Normalize(mean=mean, std=std)
+                                  ])
+    dataset = ToyboxSSL(root="../../toybox_unsupervised_learning/data/", transform=trnsfrm,
+                        rng=np.random.default_rng(3), hypertune=False, train=True, num_instances=10,
+                        num_images_per_class=1000, views=("ryminus", "ryplus"))
     print(len(dataset))
+    idx, (img1, img2) = dataset[0]
+    img1.show()
+    img2.show()
+    
