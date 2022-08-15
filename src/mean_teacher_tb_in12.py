@@ -135,9 +135,9 @@ class MeanTeacher:
                                                                        transform=self.in12_test_transform)
         
         self.source_loader = torchdata.DataLoader(self.source_dataset, batch_size=self.b_size, shuffle=True,
-                                                  num_workers=2, pin_memory=True, persistent_workers=False)
+                                                  num_workers=4, pin_memory=True, persistent_workers=False)
         self.target_loader = torchdata.DataLoader(self.target_dataset, batch_size=self.b_size, shuffle=True,
-                                                  num_workers=2, pin_memory=True, persistent_workers=False)
+                                                  num_workers=4, pin_memory=True, persistent_workers=False)
         
         self.target_loader_sup = torchdata.DataLoader(self.target_dataset_sup, batch_size=self.b_size, shuffle=True,
                                                       num_workers=2, pin_memory=True, persistent_workers=False)
