@@ -234,7 +234,7 @@ def get_aug_for_mnist():
     intens_offset_range_lower = -0.5
     intens_offset_range_upper = 0.5
     intens_flip = True
-    gaussian_noise_std = 0.1
+    gaussian_noise_std = 0.001
     
     aug = ImageAugmentation(hflip, xlat_range, affine_std,
                             intens_scale_range_lower=intens_scale_range_lower,
