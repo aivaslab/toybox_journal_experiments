@@ -103,7 +103,6 @@ def prepare_dataset(d_name, args):
 
     if not args['normalize']:
         std = UNIT_STD
-    print(std)
     args['transform'] = get_transform(d_name, mean, std)
     
     dataset = get_dataset(d_name=d_name, args=args)

@@ -116,7 +116,7 @@ class ToyboxNetwork(Network):
         self.backbone_file = self.args['backbone']
         self.validate_backbone_file()
         if self.backbone_file == "":
-            print("Loading new backbone model...")
+            print("Initializing new backbone...")
             self.backbone = models.resnet18(pretrained=False)
             self.fc_size = self.backbone.fc.in_features
             self.backbone.fc = nn.Identity()
