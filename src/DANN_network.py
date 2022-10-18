@@ -3,6 +3,8 @@ Module with the networks for the DANN experiments
 """
 import torch.nn as nn
 from torch.autograd import Function
+import torch
+import torchvision.models as models
 
 
 class GradReverse(Function):
@@ -38,8 +40,11 @@ class Network(nn.Module):
         """
         feats = self.backbone(x)
         feats = feats.view(feats.size(0), -1)
-        feats_source = feats[:source_size]
-        logits = self.classifier(feats_source)
+        if source_size > 0:
+            feats_source = feats[:source_size]
+            logits = self.classifier(feats_source)
+        else:
+            logits = None
         grad_reversed_out = GradReverse.apply(feats, alpha)
         dom = self.domain_classifier(grad_reversed_out)
         return feats, logits, dom.squeeze()
@@ -105,17 +110,40 @@ class ToyboxNetwork(Network):
     Network for Toybox experiments
     """
 
-    def __init__(self):
+    def __init__(self, init_args):
         super().__init__()
-        import torchvision.models as models
-        self.backbone = models.resnet18(pretrained=False)
-        self.fc_size = self.backbone.fc.in_features
-        self.backbone.fc = nn.Identity()
+        self.args = init_args
+        self.backbone_file = self.args['backbone']
+        self.validate_backbone_file()
+        if self.backbone_file == "":
+            print("Loading new backbone model...")
+            self.backbone = models.resnet18(pretrained=False)
+            self.fc_size = self.backbone.fc.in_features
+            self.backbone.fc = nn.Identity()
+        elif self.backbone_file == "imagenet":
+            print("Loading ILSVRC-pretrained backbone...")
+            self.backbone = models.resnet18(pretrained=True)
+            self.fc_size = self.backbone.fc.in_features
+            self.backbone.fc = nn.Identity()
+        else:
+            print("Loading backbone weights from {}...".format(self.backbone_file))
+            self.backbone = models.resnet18(pretrained=False)
+            self.fc_size = self.backbone.fc.in_features
+            self.backbone.fc = nn.Identity()
+            self.backbone.load_state_dict(torch.load(self.backbone_file))
+            
         self.classifier = nn.Linear(self.fc_size, 12)
         self.domain_classifier = nn.Sequential(nn.Linear(self.fc_size, 1000), nn.ReLU(), nn.Linear(1000, 1))
         
+    def validate_backbone_file(self):
+        """Checks whether provided backbone file name is valid"""
+        import os
+        if self.backbone_file == 'imagenet' or self.backbone_file == "" or os.path.isfile(self.backbone_file):
+            return
+        self.backbone_file = ""
         
-def get_network(source_dataset, target_dataset):
+        
+def get_network(source_dataset, target_dataset, args):
     """
     Returns the preferred network for the specified datasets
     :return:
@@ -125,8 +153,6 @@ def get_network(source_dataset, target_dataset):
     elif 'mnist' in source_dataset and 'mnist' in target_dataset:
         return MNISTNetwork()
     elif 'toybox' in source_dataset or 'toybox' in target_dataset:
-        return ToyboxNetwork()
+        return ToyboxNetwork(init_args=args)
     raise NotImplementedError("Network for src: {] and trgt: {} not implemented...".format(source_dataset,
                                                                                            target_dataset))
-    
-

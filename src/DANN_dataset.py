@@ -26,7 +26,7 @@ IN12_MEAN = (0.485, 0.456, 0.406)
 IN12_STD = (0.229, 0.224, 0.225)
 
 TOYBOX_MEAN = (0.3499, 0.4374, 0.5199)
-TOYBOX_STD = (0.1623, 1894, 1775)
+TOYBOX_STD = (0.1623, 0.1894, 0.1775)
 
 TOYBOX_DATA_PATH = "../data_12/Toybox/"
 IN12_DATA_PATH = "../data_12/IN-12/"
@@ -86,11 +86,13 @@ def get_dataset(d_name, args):
     if d_name == 'mnist-m':
         return DatasetMNISTM(train=args['train'], transform=args['transform'])
     if d_name == 'in12':
-        return DatasetIN12(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=0.2,
-                           hypertune=True)
+        fr = 0.2 if args['hypertune'] else 1.0
+        return DatasetIN12(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=fr,
+                           hypertune=args['hypertune'])
     if d_name == "toybox":
-        return DatasetToybox(root=TOYBOX_DATA_PATH, train=args['train'], transform=args['transform'], instances=5,
-                             images=1000, hypertune=True)
+        ims = 500 if args['hypertune'] else 5000
+        return DatasetToybox(root=TOYBOX_DATA_PATH, train=args['train'], transform=args['transform'], instances=-1,
+                             images=ims, hypertune=args['hypertune'])
     
     raise NotImplementedError("Transform for dataset {} has not been specified".format(d_name))
 
@@ -101,7 +103,7 @@ def prepare_dataset(d_name, args):
 
     if not args['normalize']:
         std = UNIT_STD
-
+    print(std)
     args['transform'] = get_transform(d_name, mean, std)
     
     dataset = get_dataset(d_name=d_name, args=args)
