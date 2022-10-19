@@ -56,6 +56,8 @@ def get_transform(dataset, mean, std):
         trnsfrms.insert(0, transforms.Grayscale(3))
     elif dataset == 'mnist-m':
         trnsfrms.insert(0, transforms.ToPILImage())
+    elif dataset == 'svhn':
+        pass  # no modification required for svhn dataset
     elif dataset == 'toybox':
         trnsfrms = [transforms.ToPILImage(),
                     transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5, brightness=0.3),
