@@ -88,11 +88,11 @@ def get_dataset(d_name, args):
     if d_name == 'mnist-m':
         return DatasetMNISTM(train=args['train'], transform=args['transform'])
     if d_name == 'in12':
-        fr = 0.2 if args['hypertune'] else 1.0
+        fr = 0.5 if args['hypertune'] else 1.0
         return DatasetIN12(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=fr,
                            hypertune=args['hypertune'])
     if d_name == "toybox":
-        ims = 500 if args['hypertune'] else 5000
+        ims = 2000 if args['hypertune'] else 8000
         return DatasetToybox(root=TOYBOX_DATA_PATH, train=args['train'], transform=args['transform'], instances=-1,
                              images=ims, hypertune=args['hypertune'])
     
