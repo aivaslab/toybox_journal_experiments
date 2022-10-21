@@ -3,6 +3,8 @@ import csv
 import cv2
 import numpy as np
 import pickle
+
+import torch
 import torch.utils.data as torchdata
 import torchvision.transforms as transforms
 
@@ -57,30 +59,44 @@ class Office31(torchdata.Dataset):
         if self.transform:
             img = self.transform(img)
         return item, img, label
-
-
-if __name__ == "__main__":
-    trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
-                                  transforms.Resize(224),
-                                  transforms.Normalize(mean=OFFICE31_AMAZON_MEAN, std=OFFICE31_AMAZON_STD)])
-    dataset = Office31(domain='amazon', transform=trnsfrm)
-    print(len(dataset))
-    dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=False)
-    print(utils.online_mean_and_sd(dataloader))
-
-    trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
-                                  transforms.Resize(224),
-                                  transforms.Normalize(mean=OFFICE31_DSLR_MEAN, std=OFFICE31_DSLR_STD)])
-    dataset = Office31(domain='dslr', transform=trnsfrm)
-    print(len(dataset))
-    dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=False)
-    print(utils.online_mean_and_sd(dataloader))
-
-    trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
-                                  transforms.Resize(224),
-                                  transforms.Normalize(mean=OFFICE31_WEBCAM_MEAN, std=OFFICE31_WEBCAM_STD)])
-    dataset = Office31(domain='webcam', transform=trnsfrm)
-    print(len(dataset))
-    dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=False)
-    print(utils.online_mean_and_sd(dataloader))
     
+
+def get_mean_std(dataset):
+    """Return the mean and std of the specified dataset"""
+    if dataset == 'amazon':
+        mean, std = OFFICE31_AMAZON_MEAN, OFFICE31_AMAZON_STD
+    elif dataset == 'dslr':
+        mean, std = OFFICE31_DSLR_MEAN, OFFICE31_DSLR_STD
+    elif dataset == 'webcam':
+        mean, std = OFFICE31_WEBCAM_MEAN, OFFICE31_WEBCAM_STD
+    else:
+        raise NotImplementedError("Mean and std for dataset {} has not been specified".format(dataset))
+    return mean, std
+
+
+def get_transform(dataset, mean, std):
+    """Return the image transform for the specified dataset"""
+    if dataset not in Office31.DOMAINS:
+        raise NotImplementedError("Transform for dataset {} not specified...".format(dataset))
+    trnsform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
+                                  transforms.Resize(224),
+                                  transforms.Normalize(mean=mean, std=std)])
+    
+    return trnsform
+
+
+def get_dataset(d_name, args):
+    """Return the class signature of Dataset"""
+    if d_name in Office31.DOMAINS:
+        return Office31(domain=d_name, transform=args['transform'])
+    raise NotImplementedError("Transform for dataset {} has not been specified".format(d_name))
+
+
+def prepare_dataset(d_name, args):
+    """Prepare and returh the dataset specified"""
+    mean, std = get_mean_std(dataset=d_name)
+    
+    args['transform'] = get_transform(d_name, mean, std)
+    
+    dataset = get_dataset(d_name=d_name, args=args)
+    return dataset

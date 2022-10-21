@@ -15,6 +15,7 @@ import argparse
 import os
 import tllib.alignment.jan as jan
 import tllib.modules.kernels as kernels
+import torch.nn.functional as func
 
 import utils
 import JAN_dataset
@@ -22,10 +23,6 @@ import JAN_dataset
 OUT_DIR = "../out/JAN/"
 RUNS_DIR = "../runs/JAN/"
 DATASETS = ['amazon', 'dslr', 'webcam']
-OFFICE31_AMAZON_MEAN = (0.7841, 0.7862, 0.7923)
-OFFICE31_AMAZON_STD = (0.3201, 0.3182, 0.3157)
-OFFICE31_DSLR_MEAN = (0.4064, 0.4487, 0.4709)
-OFFICE31_DSLR_STD = (0.2025, 0.1949, 0.2067)
 
 
 class JANNet(torch.nn.Module):
@@ -67,14 +64,10 @@ class Experiment:
         self.b_size = self.args['batchsize']
 
         self.net = JANNet()
-        d1_trnsform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
-                                          transforms.Resize(224),
-                                          transforms.Normalize(mean=OFFICE31_AMAZON_MEAN, std=OFFICE31_AMAZON_STD)])
-        d2_trnsform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
-                                          transforms.Resize(224),
-                                          transforms.Normalize(mean=OFFICE31_DSLR_MEAN, std=OFFICE31_DSLR_STD)])
-        self.dataset1 = JAN_dataset.Office31(domain='amazon', transform=d1_trnsform)
-        self.dataset2 = JAN_dataset.Office31(domain='dslr', transform=d2_trnsform)
+        
+        self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args={})
+        self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args={})
+        print(self.dataset1.domain, self.dataset2.domain)
 
         self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4)
         self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4)
@@ -87,7 +80,7 @@ class Experiment:
         self.jmmd_loss = jan.JointMultipleKernelMaximumMeanDiscrepancy(
             kernels=([kernels.GaussianKernel(alpha=2 ** k) for k in range(-3, 2)],
                      (kernels. GaussianKernel(sigma=0.92, track_running_stats=False),)),
-            linear=True,
+            linear=False,
             thetas=None
         ).cuda()
 
@@ -127,6 +120,14 @@ class Experiment:
         self.net.backbone.train()
         self.net.classifier.train()
 
+        def repeat(t, req_size):
+            """Repeat tensor t to reach size req_size"""
+            import torch
+            while t.shape[0] < req_size:
+                add = min(t.shape[0], req_size - t.shape[0])
+                t = torch.concat((t, t[:add]))
+            return t
+        
         total_batches = 0
         loader_2_iter = iter(self.loader_2)
         for ep in range(1, self.num_epochs + 1):
@@ -142,7 +143,12 @@ class Experiment:
                     loader_2_iter = iter(self.loader_2)
                     idx2, img2, labels2 = next(loader_2_iter)
                 self.optimizer.zero_grad()
-
+                if idx1.shape[0] < idx2.shape[0]:
+                    idx1, img1, labels1 = repeat(idx1, idx2.shape[0]), repeat(img1, idx2.shape[0]), \
+                                          repeat(labels1, idx2.shape[0])
+                elif idx1.shape[0] > idx2.shape[0]:
+                    idx2, img2, labels2 = repeat(idx2, idx1.shape[0]), repeat(img2, idx1.shape[0]), \
+                                          repeat(labels2, idx1.shape[0])
                 p = total_batches / (len(self.loader_1) * self.num_epochs)
                 alfa = 2 / (1 + math.exp(-10 * p)) - 1
 
@@ -156,11 +162,7 @@ class Experiment:
 
                 ce_loss = nn.CrossEntropyLoss()(s_l, labels1)
                 total_batches += 1
-                import torch.nn.functional as F
-                if img1.size(0) == img2.size(0):
-                    jmmd_loss = self.jmmd_loss((s_f, F.softmax(s_l, dim=1)), (t_f, F.softmax(t_l, dim=1)))
-                else:
-                    jmmd_loss = torch.tensor([0.0]).cuda()
+                jmmd_loss = self.jmmd_loss((s_f, func.softmax(s_l, dim=1)), (t_f, func.softmax(t_l, dim=1)))
                 total_loss = ce_loss + alfa * jmmd_loss
                 total_loss.backward()
                 self.optimizer.step()
