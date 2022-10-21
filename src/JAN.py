@@ -69,8 +69,10 @@ class Experiment:
         self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args={})
         print(self.dataset1.domain, self.dataset2.domain)
 
-        self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4)
-        self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4)
+        self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4,
+                                             drop_last=True)
+        self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4,
+                                             drop_last=True)
 
         self.net = self.net.cuda()
         classifier_lr = self.get_lr(p=0.0)
@@ -120,14 +122,6 @@ class Experiment:
         self.net.backbone.train()
         self.net.classifier.train()
 
-        def repeat(t, req_size):
-            """Repeat tensor t to reach size req_size"""
-            import torch
-            while t.shape[0] < req_size:
-                add = min(t.shape[0], req_size - t.shape[0])
-                t = torch.concat((t, t[:add]))
-            return t
-        
         total_batches = 0
         loader_2_iter = iter(self.loader_2)
         for ep in range(1, self.num_epochs + 1):
@@ -143,12 +137,6 @@ class Experiment:
                     loader_2_iter = iter(self.loader_2)
                     idx2, img2, labels2 = next(loader_2_iter)
                 self.optimizer.zero_grad()
-                if idx1.shape[0] < idx2.shape[0]:
-                    idx1, img1, labels1 = repeat(idx1, idx2.shape[0]), repeat(img1, idx2.shape[0]), \
-                                          repeat(labels1, idx2.shape[0])
-                elif idx1.shape[0] > idx2.shape[0]:
-                    idx2, img2, labels2 = repeat(idx2, idx1.shape[0]), repeat(img2, idx1.shape[0]), \
-                                          repeat(labels2, idx1.shape[0])
                 p = total_batches / (len(self.loader_1) * self.num_epochs)
                 alfa = 2 / (1 + math.exp(-10 * p)) - 1
 
