@@ -74,14 +74,22 @@ def get_mean_std(dataset):
     return mean, std
 
 
-def get_transform(dataset, mean, std):
+def get_transform(dataset, mean, std, args):
     """Return the image transform for the specified dataset"""
     if dataset not in Office31.DOMAINS:
         raise NotImplementedError("Transform for dataset {} not specified...".format(dataset))
-    trnsform = transforms.Compose([transforms.ToPILImage(), transforms.ToTensor(),
-                                  transforms.Resize(224),
-                                  transforms.Normalize(mean=mean, std=std)])
-    
+    if args['train']:
+        trnsform = transforms.Compose([transforms.ToPILImage(),
+                                       transforms.Resize(256),
+                                       transforms.RandomResizedCrop(size=(224,224)),
+                                       transforms.RandomHorizontalFlip(p=0.5),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize(mean=mean, std=std)])
+    else:
+        trnsform = transforms.Compose([transforms.ToPILImage(),
+                                       transforms.Resize(224),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize(mean=mean, std=std)])
     return trnsform
 
 
@@ -96,7 +104,7 @@ def prepare_dataset(d_name, args):
     """Prepare and returh the dataset specified"""
     mean, std = get_mean_std(dataset=d_name)
     
-    args['transform'] = get_transform(d_name, mean, std)
+    args['transform'] = get_transform(d_name, mean, std, args=args)
     
     dataset = get_dataset(d_name=d_name, args=args)
     return dataset

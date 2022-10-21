@@ -65,14 +65,25 @@ class Experiment:
 
         self.net = JANNet()
         
-        self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args={})
-        self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args={})
+        self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args={'train': True})
+        self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args={'train': True})
         print(self.dataset1.domain, self.dataset2.domain)
 
         self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4,
                                              drop_last=True)
         self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4,
                                              drop_last=True)
+        
+        self.test_dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args={'train': False})
+        self.test_dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args={'train': False})
+        self.test_loader_1 = torchdata.DataLoader(self.test_dataset1, batch_size=2*self.b_size, shuffle=False,
+                                                  num_workers=4)
+        self.test_loader_2 = torchdata.DataLoader(self.test_dataset2, batch_size=2*self.b_size, shuffle=False,
+                                                  num_workers=4)
+        
+        self.loaders = [self.loader_1, self.test_loader_1, self.loader_2, self.test_loader_2]
+        self.loader_names = [self.source_dataset, self.source_dataset + "_test", self.target_dataset,
+                             self.target_dataset + "_test"]
 
         self.net = self.net.cuda()
         classifier_lr = self.get_lr(p=0.0)
@@ -202,11 +213,9 @@ class Experiment:
         """
         self.net.backbone.eval()
         self.net.classifier.eval()
-        dataloaders = [self.loader_1, self.loader_2]
-        d_names = [self.source_dataset, self.target_dataset]
         accuracies = {}
-        for d_idx in range(len(dataloaders)):
-            loader = dataloaders[d_idx]
+        for d_idx in range(len(self.loaders)):
+            loader = self.loaders[d_idx]
             total_num = 0
             correct_num = 0
             for idx, images, labels in loader:
@@ -217,9 +226,9 @@ class Experiment:
                     total_num += logits.size(0)
                     correct_num += res[0].item() * logits.size(0)
             acc = correct_num / total_num
-            print("Accuracy on dataset {}: {:.2f}".format(d_names[d_idx], acc))
-            accuracies[d_names[d_idx]] = acc
-            self.tb_writer.add_text(tag="Accuracy/" + d_names[d_idx], text_string=str(acc))
+            print("Accuracy on {}: {:.2f}".format(self.loader_names[d_idx], acc))
+            accuracies[self.loader_names[d_idx]] = acc
+            self.tb_writer.add_text(tag="Accuracy/" + self.loader_names[d_idx], text_string=str(acc))
         acc_file_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
                                  + self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/acc.json"
         import json
