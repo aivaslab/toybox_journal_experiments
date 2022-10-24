@@ -22,7 +22,7 @@ import JAN_dataset
 
 OUT_DIR = "../out/JAN/"
 RUNS_DIR = "../runs/JAN/"
-DATASETS = ['amazon', 'dslr', 'webcam']
+DATASETS = ['amazon', 'dslr', 'webcam', 'toybox', 'in12']
 
 
 class JANNet(torch.nn.Module):
@@ -62,20 +62,21 @@ class Experiment:
         self.starting_lr = self.args['starting_lr']
         self.hypertune = not self.args['final']
         self.b_size = self.args['batchsize']
-
-        self.net = JANNet()
+        self.debug = self.args['debug']
         
-        self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args={'train': True})
-        self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args={'train': True})
-        print(self.dataset1.domain, self.dataset2.domain)
+        self.net = JANNet()
+        dataset_args = {'train': True, 'hypertune': self.hypertune}
+        self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
+        self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
+        print("{} -> {}".format(str(self.dataset1), str(self.dataset2)))
 
         self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4,
                                              drop_last=True)
         self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4,
                                              drop_last=True)
-        
-        self.test_dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args={'train': False})
-        self.test_dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args={'train': False})
+        dataset_args['train'] = False
+        self.test_dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
+        self.test_dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
         self.test_loader_1 = torchdata.DataLoader(self.test_dataset1, batch_size=2*self.b_size, shuffle=False,
                                                   num_workers=4)
         self.test_loader_2 = torchdata.DataLoader(self.test_dataset2, batch_size=2*self.b_size, shuffle=False,
@@ -102,6 +103,7 @@ class Experiment:
         runs_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
                              + self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
         self.tb_writer = tb.SummaryWriter(log_dir=runs_path)
+        print("Saving experiment tracking data to {}...".format(runs_path))
         self.save_args(path=runs_path)
 
     def save_args(self, path):
@@ -152,13 +154,23 @@ class Experiment:
                 alfa = 2 / (1 + math.exp(-10 * p)) - 1
 
                 img1, labels1 = img1.cuda(), labels1.cuda()
-                s_f, s_l = self.net.forward(img1)
                 img2 = img2.cuda()
-                t_f, t_l = self.net.forward(img2)
+                if self.combined_batch:
+                    img = torch.concat([img1, img2], dim=0)
+                    features, logits = self.net.forward(img)
+                    ssize = img1.shape[0]
+                    s_f, s_l = features[:ssize], logits[:ssize]
+                    t_f, t_l = features[ssize:], logits[ssize:]
+    
+                    if total_batches == 0 and self.debug:
+                        print(img1.size(), img2.size(), img.size(), s_l.size(), t_l.size(), logits.size(),
+                              s_f.size(), t_f.size(), features.size())
+                else:
+                    s_f, s_l = self.net.forward(img1)
+                    t_f, t_l = self.net.forward(img2)
+                    if total_batches == 0 and self.debug:
+                        print(img1.size(), img2.size(), s_l.size(), t_l.size(), s_f.size(), t_f.size())
                 
-                if total_batches == 0 and False:
-                    print(img1.size(), img2.size(), s_l.size(), t_l.size(), s_f.size(), t_f.size())
-
                 ce_loss = nn.CrossEntropyLoss()(s_l, labels1)
                 total_batches += 1
                 jmmd_loss = self.jmmd_loss((s_f, func.softmax(s_l, dim=1)), (t_f, func.softmax(t_l, dim=1)))
@@ -257,6 +269,7 @@ def get_parser():
     parser.add_argument("--starting-lr", "-lr", default=0.05, type=float)
     parser.add_argument("--final", default=False, action='store_true')
     parser.add_argument("--batchsize", "-b", default=64, type=int)
+    parser.add_argument("--debug", default=False, action='store_true')
 
     return vars(parser.parse_args())
 
