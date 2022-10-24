@@ -18,6 +18,16 @@ OFFICE31_DSLR_STD = (0.2025, 0.1949, 0.2067)
 OFFICE31_WEBCAM_MEAN = (0.6172, 0.6187, 0.6120)
 OFFICE31_WEBCAM_STD = (0.2589, 0.2568, 0.2519)
 
+IN12_MEAN = (0.485, 0.456, 0.406)
+IN12_STD = (0.229, 0.224, 0.225)
+
+TOYBOX_MEAN = (0.3499, 0.4374, 0.5199)
+TOYBOX_STD = (0.1623, 0.1894, 0.1775)
+
+TOYBOX_DATA_PATH = "../data_12/Toybox/"
+IN12_DATA_PATH = "../data_12/IN-12/"
+DATASETS = ['amazon', 'dslr', 'webcam', 'toybox', 'in12']
+
 
 class Office31(torchdata.Dataset):
     """
@@ -60,6 +70,50 @@ class Office31(torchdata.Dataset):
             img = self.transform(img)
         return item, img, label
     
+    def __str__(self):
+        return "Office-31 " + self.domain
+
+
+class DatasetToybox(torchdata.Dataset):
+    """
+    Class definition for Toybox dataset
+    """
+    
+    def __init__(self, root, train, transform, hypertune, instances, images):
+        import dataset_toybox
+        self.dataset = dataset_toybox.ToyboxDataset(root=root, train=train, transform=transform, hypertune=hypertune,
+                                                    rng=np.random.default_rng(), num_instances=instances,
+                                                    num_images_per_class=images)
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, item):
+        return self.dataset[item]
+    
+    def __str__(self):
+        return "Toybox"
+
+
+class DatasetIN12(torchdata.Dataset):
+    """
+    Class definition for IN-12 dataset
+    """
+    
+    def __init__(self, root, train, transform, fraction, hypertune):
+        import dataset_imagenet12
+        self.dataset = dataset_imagenet12.DataLoaderGeneric(root=root, train=train, transform=transform,
+                                                            fraction=fraction, hypertune=hypertune)
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, item):
+        return self.dataset[item]
+    
+    def __str__(self):
+        return "IN12"
+
 
 def get_mean_std(dataset):
     """Return the mean and std of the specified dataset"""
@@ -69,6 +123,10 @@ def get_mean_std(dataset):
         mean, std = OFFICE31_DSLR_MEAN, OFFICE31_DSLR_STD
     elif dataset == 'webcam':
         mean, std = OFFICE31_WEBCAM_MEAN, OFFICE31_WEBCAM_STD
+    elif dataset == 'toybox':
+        mean, std = TOYBOX_MEAN, TOYBOX_STD
+    elif dataset == 'in12':
+        mean, std = IN12_MEAN, IN12_STD
     else:
         raise NotImplementedError("Mean and std for dataset {} has not been specified".format(dataset))
     return mean, std
@@ -76,12 +134,12 @@ def get_mean_std(dataset):
 
 def get_transform(dataset, mean, std, args):
     """Return the image transform for the specified dataset"""
-    if dataset not in Office31.DOMAINS:
+    if dataset not in DATASETS:
         raise NotImplementedError("Transform for dataset {} not specified...".format(dataset))
     if args['train']:
         trnsform = transforms.Compose([transforms.ToPILImage(),
                                        transforms.Resize(256),
-                                       transforms.RandomResizedCrop(size=(224,224)),
+                                       transforms.RandomResizedCrop(size=(224, 224)),
                                        transforms.RandomHorizontalFlip(p=0.5),
                                        transforms.ToTensor(),
                                        transforms.Normalize(mean=mean, std=std)])
@@ -97,6 +155,14 @@ def get_dataset(d_name, args):
     """Return the class signature of Dataset"""
     if d_name in Office31.DOMAINS:
         return Office31(domain=d_name, transform=args['transform'])
+    elif d_name == 'toybox':
+        ims = 2000 if args['hypertune'] else 8000
+        return DatasetToybox(root=TOYBOX_DATA_PATH, train=args['train'], transform=args['transform'], instances=-1,
+                             images=ims, hypertune=args['hypertune'])
+    elif d_name == 'in12':
+        fr = 0.5 if args['hypertune'] else 1.0
+        return DatasetIN12(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=fr,
+                           hypertune=args['hypertune'])
     raise NotImplementedError("Transform for dataset {} has not been specified".format(d_name))
 
 
