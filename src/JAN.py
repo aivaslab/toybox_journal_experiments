@@ -19,29 +19,11 @@ import torch.nn.functional as func
 
 import utils
 import JAN_dataset
+import JAN_network
 
 OUT_DIR = "../out/JAN/"
 RUNS_DIR = "../runs/JAN/"
 DATASETS = ['amazon', 'dslr', 'webcam', 'toybox', 'in12']
-
-
-class JANNet(torch.nn.Module):
-    """Network for JAN experiments"""
-    def __init__(self):
-        super(JANNet, self).__init__()
-        self.backbone = models.resnet18(pretrained=True)
-        self.fc_size = self.backbone.fc.in_features
-        self.backbone.fc = nn.Identity()
-        self.classifier = nn.Linear(self.fc_size, 31)
-        
-    def forward(self, x):
-        """
-        Forward method for network
-        """
-        feats = self.backbone(x)
-        feats_view = feats.view(feats.size(0), -1)
-        logits = self.classifier(feats_view)
-        return feats, logits
 
 
 class Experiment:
@@ -64,7 +46,8 @@ class Experiment:
         self.b_size = self.args['batchsize']
         self.debug = self.args['debug']
         
-        self.net = JANNet()
+        network_args = {'backbone': self.backbone}
+        self.net = JAN_network.get_network(args=network_args)
         dataset_args = {'train': True, 'hypertune': self.hypertune}
         self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
         self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
