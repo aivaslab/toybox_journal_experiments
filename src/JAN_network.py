@@ -10,10 +10,11 @@ import os
 class JANNet(torch.nn.Module):
     """Network for JAN experiments"""
     
-    def __init__(self, backbone_file):
+    def __init__(self, backbone_file, num_classes):
         super(JANNet, self).__init__()
         self.backbone_file = backbone_file
         self.validate_backbone_file()
+        self.num_classes = num_classes
         if self.backbone_file == "imagenet":
             print("Loading backbone weights from ILSVRC trained model...")
             self.backbone = models.resnet18(pretrained=True)
@@ -22,7 +23,7 @@ class JANNet(torch.nn.Module):
             self.backbone = models.resnet18(pretrained=False)
         self.fc_size = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
-        self.classifier = nn.Linear(self.fc_size, 31)
+        self.classifier = nn.Linear(self.fc_size, self.num_classes)
         if self.backbone_file != "" and self.backbone_file != "imagenet":
             print("Loading backbone weights from {}...".format(self.backbone_file))
             self.backbone.load_state_dict(torch.load(self.backbone_file))
@@ -45,4 +46,7 @@ class JANNet(torch.nn.Module):
 
 def get_network(args):
     """Returns the specified model for JAN experiments"""
-    return JANNet(backbone_file=args['backbone'])
+    if 'toybox' in args['datasets']:
+        return JANNet(backbone_file=args['backbone'], num_classes=12)
+    else:
+        return JANNet(backbone_file=args['backbone'], num_classes=31)

@@ -4,8 +4,6 @@ Joint Adaptation Networks: https://arxiv.org/pdf/1605.06636.pdf
 """
 
 import torch
-import torchvision.models as models
-import torchvision.transforms as transforms
 import torch.utils.data as torchdata
 import torch.nn as nn
 import tqdm
@@ -46,7 +44,7 @@ class Experiment:
         self.b_size = self.args['batchsize']
         self.debug = self.args['debug']
         
-        network_args = {'backbone': self.backbone}
+        network_args = {'backbone': self.backbone, 'datasets': [self.source_dataset, self.target_dataset]}
         self.net = JAN_network.get_network(args=network_args)
         dataset_args = {'train': True, 'hypertune': self.hypertune}
         self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
