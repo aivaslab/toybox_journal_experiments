@@ -76,6 +76,7 @@ class Experiment:
         runs_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
                              + self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
         self.tb_writer = tb.SummaryWriter(log_dir=runs_path)
+        print("Saving experiment tracking data to {}...".format(runs_path))
         self.save_args(path=runs_path)
 
     def save_args(self, path):

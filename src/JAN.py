@@ -66,11 +66,15 @@ class Experiment:
         self.loaders = [self.loader_1, self.test_loader_1, self.loader_2, self.test_loader_2]
         self.loader_names = [self.source_dataset, self.source_dataset + "_test", self.target_dataset,
                              self.target_dataset + "_test"]
+        if self.net.backbone_file == "":
+            self.backbone_opt_weight = 1
+        else:
+            self.backbone_opt_weight = 0.1
 
         self.net = self.net.cuda()
         classifier_lr = self.get_lr(p=0.0)
-        self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=classifier_lr/10, weight_decay=1e-5,
-                                         momentum=0.9)
+        self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=classifier_lr*self.backbone_opt_weight,
+                                         weight_decay=1e-5, momentum=0.9)
         self.optimizer.add_param_group({'params': self.net.classifier.parameters(), 'lr': classifier_lr})
         self.jmmd_loss = jan.JointMultipleKernelMaximumMeanDiscrepancy(
             kernels=([kernels.GaussianKernel(alpha=2 ** k) for k in range(-3, 2)],
@@ -189,7 +193,7 @@ class Experiment:
                                            global_step=total_batches)
 
                 next_lr = self.get_lr(p=p)
-                self.optimizer.param_groups[0]['lr'] = next_lr / 10
+                self.optimizer.param_groups[0]['lr'] = next_lr * self.backbone_opt_weight
                 self.optimizer.param_groups[1]['lr'] = next_lr
 
         if self.save:
