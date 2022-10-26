@@ -117,6 +117,7 @@ class Experiment:
         """
         Train network
         """
+        self.calc_test_losses(batches=0)
         self.net.backbone.train()
         self.net.classifier.train()
 
@@ -195,6 +196,11 @@ class Experiment:
                 next_lr = self.get_lr(p=p)
                 self.optimizer.param_groups[0]['lr'] = next_lr * self.backbone_opt_weight
                 self.optimizer.param_groups[1]['lr'] = next_lr
+            
+            if ep % 5 == 0:
+                self.calc_test_losses(batches=total_batches)
+                self.net.classifier.train()
+                self.net.backbone.train()
 
         if self.save:
             out_dir = OUT_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" + \
@@ -203,6 +209,26 @@ class Experiment:
             print("Saving model components to {}".format(out_dir))
             torch.save(self.net.backbone.state_dict(), out_dir + "backbone_final.pt")
             torch.save(self.net.classifier.state_dict(), out_dir + "classifier_final.pt")
+
+    def calc_test_losses(self, batches):
+        """
+        Pass dataset through network and calculate losses
+        """
+        total_ce = 0.0
+        batches_total = 0
+        self.net.backbone.eval()
+        self.net.classifier.eval()
+        
+        for _, images, labels in self.test_loader_2:
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                _, t_l = self.net.forward(images)
+                batch_ce = nn.CrossEntropyLoss()(t_l, labels)
+                total_ce += batch_ce.item()
+                batches_total += 1
+        test_ce = total_ce / batches_total
+        
+        self.tb_writer.add_scalar(tag="Test/CE", scalar_value=test_ce, global_step=batches)
 
     def eval(self):
         """

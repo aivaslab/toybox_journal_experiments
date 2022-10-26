@@ -66,10 +66,16 @@ class Experiment:
         self.test_loader_2 = torchdata.DataLoader(self.test_dataset2, batch_size=2 * self.b_size, num_workers=4)
 
         self.net = self.net.cuda()
-        self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=self.get_lr(p=0.0), weight_decay=1e-5,
-                                         momentum=0.9)
-        self.optimizer.add_param_group({'params': self.net.classifier.parameters()})
-        self.optimizer.add_param_group({'params': self.net.domain_classifier.parameters()})
+        if ('toybox' in self.source_dataset or 'toybox' in self.target_dataset) and self.net.backbone_file != "":
+            self.backbone_lr_wt = 0.1
+        else:
+            self.backbone_lr_wt = 1.0
+        
+        classifier_lr = self.get_lr(p=0.0)
+        self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=classifier_lr*self.backbone_lr_wt,
+                                         weight_decay=1e-5, momentum=0.9)
+        self.optimizer.add_param_group({'params': self.net.classifier.parameters(), 'lr': classifier_lr})
+        self.optimizer.add_param_group({'params': self.net.domain_classifier.parameters(), 'lr': classifier_lr})
 
         import datetime
         self.exp_time = datetime.datetime.now()
@@ -105,6 +111,7 @@ class Experiment:
         """
         Train network
         """
+        self.calc_test_losses(batches=0)
         self.net.backbone.train()
         self.net.classifier.train()
         self.net.domain_classifier.train()
@@ -156,11 +163,11 @@ class Experiment:
                 ep_ce_loss += ce_loss.item()
                 ep_dom_loss += dom_loss.item()
                 ep_tot_loss += total_loss.item()
-                tqdm_bar.set_description("Ep: {}/{}  LR: {:.4f}  CE Loss: {:.4f}  Dom Loss: {:.4f} Lmbda: {:.4f}  "
-                                         "Tot Loss: {:.4f}".format(ep, self.num_epochs,
-                                                                   self.optimizer.param_groups[0]['lr'],
-                                                                   ep_ce_loss/ep_batches, ep_dom_loss/ep_batches, alfa,
-                                                                   ep_tot_loss/ep_batches))
+                tqdm_bar.set_description("Ep: {}/{}  BLR: {:.4f}  CLR: {:.4f}  CE Loss: {:.4f}  Dom Loss: {:.4f} "
+                                         "Lmbda: {:.4f}  Tot Loss: {:.4f}".
+                                         format(ep, self.num_epochs, self.optimizer.param_groups[0]['lr'],
+                                                self.optimizer.param_groups[1]['lr'], ep_ce_loss/ep_batches,
+                                                ep_dom_loss/ep_batches, alfa, ep_tot_loss/ep_batches))
 
                 self.tb_writer.add_scalar(tag="LR", scalar_value=self.optimizer.param_groups[0]['lr'],
                                           global_step=total_batches)
@@ -181,8 +188,15 @@ class Experiment:
 
                 next_lr = self.get_lr(p=p)
                 for idx_group in range(len(self.optimizer.param_groups)):
-                    self.optimizer.param_groups[idx_group]['lr'] = next_lr
+                    wt = 1 if idx_group > 0 else self.backbone_lr_wt
+                    self.optimizer.param_groups[idx_group]['lr'] = next_lr * wt
 
+            if ep % 5 == 0:
+                self.calc_test_losses(batches=total_batches)
+                self.net.classifier.train()
+                self.net.backbone.train()
+                self.net.domain_classifier.train()
+                
         if self.save:
             out_dir = OUT_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" + \
                       self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
@@ -191,6 +205,33 @@ class Experiment:
             torch.save(self.net.backbone.state_dict(), out_dir + "backbone_final.pt")
             torch.save(self.net.classifier.state_dict(), out_dir + "classifier_final.pt")
             torch.save(self.net.domain_classifier.state_dict(), out_dir + "domain_classifier_final.pt")
+            
+    def calc_test_losses(self, batches):
+        """
+        Pass dataset through network and calculate losses
+        """
+        total_ce = 0.0
+        batches_total = 0
+        total_examples = 0
+        total_activations = None
+        self.net.backbone.eval()
+        self.net.classifier.eval()
+        self.net.domain_classifier.eval()
+        for _, images, labels in self.test_loader_2:
+            images, labels = images.cuda(), labels.cuda()
+            with torch.no_grad():
+                f, t_l, _ = self.net.forward(images, images.size(0), alpha=0)
+                p = torch.softmax(t_l, dim=1)
+                if total_activations is None:
+                    total_activations = torch.sum(p, dim=0)
+                else:
+                    total_activations += torch.sum(p, dim=0)
+                total_examples += t_l.shape[0]
+                batch_ce = nn.CrossEntropyLoss()(t_l, labels)
+                total_ce += batch_ce.item()
+                batches_total += 1
+        test_ce = total_ce / batches_total
+        self.tb_writer.add_scalar(tag="Test/CE", scalar_value=test_ce, global_step=batches)
 
     def eval(self):
         """
