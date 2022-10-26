@@ -105,10 +105,11 @@ class Experiment:
     @staticmethod
     def entropy_loss(logits):
         """Entropy Loss calculation"""
-        logits = torch.softmax(logits, dim=1)
-        log_logits = torch.clamp(torch.log2(logits), max=10000, min=-10000)
-        entropy = logits * log_logits * -1
-        entropy = torch.sum(entropy, dim=1)
+        log_probs = torch.nn.LogSoftmax(dim=1)(logits)
+        # log_logits = torch.clamp(torch.log2(logits), max=10000, min=-10000)
+        probs = torch.exp(log_probs)
+        entropy = log_probs * probs
+        entropy = -entropy.mean()
         return entropy
     
     def train(self):
@@ -157,9 +158,6 @@ class Experiment:
                 ce_loss = nn.CrossEntropyLoss()(s_l, labels1)
                 total_batches += 1
                 entropy = self.entropy_loss(logits=t_l)
-                if total_batches == 0 and self.debug:
-                    print(entropy.size())
-                entropy = torch.mean(entropy)
                 total_loss = ce_loss + alfa * entropy
                 total_loss.backward()
                 self.optimizer.step()
