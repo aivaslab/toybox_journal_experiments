@@ -69,8 +69,12 @@ class Experiment:
         
         self.net = self.net.cuda()
         classifier_lr = self.get_lr(batches=0.0)
-        self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=classifier_lr / 10, weight_decay=1e-5,
-                                         momentum=0.9)
+        if self.net.backbone_file == "":
+            self.backbone_lr_wt = 1.0
+        else:
+            self.backbone_lr_wt = 0.1
+        self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=classifier_lr*self.backbone_lr_wt,
+                                         weight_decay=1e-5, momentum=0.9)
         self.optimizer.add_param_group({'params': self.net.classifier.parameters(), 'lr': classifier_lr})
         
         import datetime
@@ -192,7 +196,7 @@ class Experiment:
                                            global_step=total_batches)
                 
                 next_lr = self.get_lr(batches=total_batches)
-                self.optimizer.param_groups[0]['lr'] = next_lr / 10
+                self.optimizer.param_groups[0]['lr'] = next_lr * self.backbone_lr_wt
                 self.optimizer.param_groups[1]['lr'] = next_lr
             
             self.calc_test_losses(batches=total_batches)
