@@ -158,16 +158,22 @@ class Experiment:
                 total_loss = ce_loss + dom_loss
                 total_loss.backward()
                 self.optimizer.step()
+                
+                with torch.no_grad():
+                    img2, labels2 = img2.cuda(), labels2.cuda()
+                    _, val_l, _ = self.net.forward(img2, img2.size(0), alpha=0)
+                    val_ce_loss = nn.CrossEntropyLoss()(val_l, labels2)
 
                 ep_batches += 1
                 ep_ce_loss += ce_loss.item()
                 ep_dom_loss += dom_loss.item()
                 ep_tot_loss += total_loss.item()
-                tqdm_bar.set_description("Ep: {}/{}  BLR: {:.4f}  CLR: {:.4f}  CE Loss: {:.4f}  Dom Loss: {:.4f} "
-                                         "Lmbda: {:.4f}  Tot Loss: {:.4f}".
+                tqdm_bar.set_description("Ep: {}/{}  BLR: {:.4f}  CLR: {:.4f}  CE: {:.3f}  Dom: {:.3f} "
+                                         "Lmbda: {:.2f}  Tot Loss: {:.4f}  Trgt CE: {:.3f}".
                                          format(ep, self.num_epochs, self.optimizer.param_groups[0]['lr'],
                                                 self.optimizer.param_groups[1]['lr'], ep_ce_loss/ep_batches,
-                                                ep_dom_loss/ep_batches, alfa, ep_tot_loss/ep_batches))
+                                                ep_dom_loss/ep_batches, alfa, ep_tot_loss/ep_batches,
+                                                val_ce_loss.item()))
 
                 self.tb_writer.add_scalar(tag="LR", scalar_value=self.optimizer.param_groups[0]['lr'],
                                           global_step=total_batches)
@@ -176,7 +182,8 @@ class Experiment:
                 self.tb_writer.add_scalars(main_tag="Training",
                                            tag_scalar_dict={'CE Loss (Batch)': ce_loss.item(),
                                                             'Dom Loss (Batch)': dom_loss.item(),
-                                                            'Total Loss (Batch)': total_loss.item()
+                                                            'Total Loss (Batch)': total_loss.item(),
+                                                            'Target CE (Batch)': val_ce_loss.item()
                                                             },
                                            global_step=total_batches)
                 self.tb_writer.add_scalars(main_tag="Training",

@@ -140,7 +140,7 @@ class Experiment:
                 alfa = 2 / (1 + math.exp(-10 * p)) - 1
 
                 img1, labels1 = img1.cuda(), labels1.cuda()
-                img2 = img2.cuda()
+                img2, labels2 = img2.cuda(), labels2.cuda()
                 if self.combined_batch:
                     img = torch.concat([img1, img2], dim=0)
                     features, logits = self.net.forward(img)
@@ -163,18 +163,20 @@ class Experiment:
                 total_loss = ce_loss + alfa * jmmd_loss
                 total_loss.backward()
                 self.optimizer.step()
+                with torch.no_grad():
+                    val_ce_loss = nn.CrossEntropyLoss()(t_l, labels2)
 
                 ep_batches += 1
                 ep_ce_loss += ce_loss.item()
                 ep_jmmd_loss += jmmd_loss.item()
                 ep_tot_loss += total_loss.item()
-                tqdm_bar.set_description("Ep: {}/{}  BLR: {:.4f}  CLR: {:.4f}  CE Loss: {:.4f}  JMMD Loss: {:.4f} "
-                                         "Lmbda: {:.4f}  "
-                                         "Tot Loss: {:.4f}".format(ep, self.num_epochs,
+                tqdm_bar.set_description("Ep: {}/{}  BLR: {:.4f}  CLR: {:.3f}  CE: {:.3f}  JMMD: {:.3f} "
+                                         "Lmbda: {:.2f}  Trgt CE: {:.2f}  "
+                                         "Tot Loss: {:.3f}".format(ep, self.num_epochs,
                                                                    self.optimizer.param_groups[0]['lr'],
                                                                    self.optimizer.param_groups[1]['lr'],
                                                                    ep_ce_loss/ep_batches, ep_jmmd_loss/ep_batches, alfa,
-                                                                   ep_tot_loss/ep_batches))
+                                                                   val_ce_loss.item(), ep_tot_loss/ep_batches))
 
                 self.tb_writer.add_scalar(tag="LR", scalar_value=self.optimizer.param_groups[0]['lr'],
                                           global_step=total_batches)
@@ -183,7 +185,8 @@ class Experiment:
                 self.tb_writer.add_scalars(main_tag="Training",
                                            tag_scalar_dict={'CE Loss (Batch)': ce_loss.item(),
                                                             'JMMD Loss (Batch)': jmmd_loss.item(),
-                                                            'Total Loss (Batch)': total_loss.item()
+                                                            'Total Loss (Batch)': total_loss.item(),
+                                                            'Target CE (Batch)': val_ce_loss.item()
                                                             },
                                            global_step=total_batches)
                 self.tb_writer.add_scalars(main_tag="Training",
