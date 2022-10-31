@@ -150,9 +150,11 @@ def get_network(source_dataset, target_dataset, args):
     """
     if source_dataset == 'svhn' or target_dataset == 'svhn':
         return SVHNNetwork()
+    elif source_dataset == 'mnist50' and target_dataset == 'svhn-b':
+        return SVHNNetwork()
     elif 'mnist' in source_dataset and 'mnist' in target_dataset:
         return MNISTNetwork()
     elif 'toybox' in source_dataset or 'toybox' in target_dataset:
         return ToyboxNetwork(init_args=args)
-    raise NotImplementedError("Network for src: {] and trgt: {} not implemented...".format(source_dataset,
+    raise NotImplementedError("Network for src: {} and trgt: {} not implemented...".format(source_dataset,
                                                                                            target_dataset))

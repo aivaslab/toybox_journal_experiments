@@ -10,6 +10,8 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 import utils
+import dataset_mnist50
+import dataset_svhn_balanced
 
 UNIT_STD = (1.0, 1.0, 1.0)
 
@@ -34,11 +36,11 @@ IN12_DATA_PATH = "../data_12/IN-12/"
 
 def get_mean_std(dataset):
     """Return the mean and std of the specified dataset"""
-    if dataset == 'mnist':
+    if dataset == 'mnist' or dataset == 'mnist50':
         mean, std = MNIST_MEAN, MNIST_STD
     elif dataset == 'mnist-m':
         mean, std = MNISTM_MEAN, MNISTM_STD
-    elif dataset == 'svhn':
+    elif dataset == 'svhn' or dataset == 'svhn-b':
         mean, std = SVHN_MEAN, SVHN_STD
     elif dataset == 'toybox':
         mean, std = TOYBOX_MEAN, TOYBOX_STD
@@ -54,10 +56,20 @@ def get_transform(dataset, mean, std):
     trnsfrms = [transforms.Resize(32), transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]
     if dataset == 'mnist':
         trnsfrms.insert(0, transforms.Grayscale(3))
+    elif dataset == 'mnist50':
+        trnsfrms = [transforms.ToPILImage(),
+                    transforms.Resize(32),
+                    transforms.Grayscale(3),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=mean, std=std)]
     elif dataset == 'mnist-m':
         trnsfrms.insert(0, transforms.ToPILImage())
     elif dataset == 'svhn':
         pass  # no modification required for svhn dataset
+    elif dataset == 'svhn-b':
+        trnsfrms = [transforms.Resize(32),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=mean, std=std)]
     elif dataset == 'toybox':
         trnsfrms = [transforms.ToPILImage(),
                     transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5, brightness=0.3),
@@ -83,8 +95,13 @@ def get_dataset(d_name, args):
     """Return the class signature of Dataset"""
     if d_name == 'mnist':
         return DatasetMNIST(transform=args['transform'], train=args['train'])
+    if d_name == 'mnist50':
+        return dataset_mnist50.DatasetMNIST50(train=args['train'], transform=args['transform'])
     if d_name == 'svhn':
         return DatasetSVHN(transform=args['transform'], train=args['train'])
+    if d_name == 'svhn-b':
+        return dataset_svhn_balanced.BalancedSVHN(root='../data/', train=args['train'], transform=args['transform'],
+                                                  hypertune=args['hypertune'])
     if d_name == 'mnist-m':
         return DatasetMNISTM(train=args['train'], transform=args['transform'])
     if d_name == 'in12':

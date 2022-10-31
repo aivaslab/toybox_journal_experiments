@@ -22,7 +22,7 @@ import DANN_dataset as DANNDatasets
 
 OUT_DIR = "../out/DANN/"
 RUNS_DIR = "../runs/DANN/"
-DATASETS = ['mnist', 'mnist-m', 'svhn', 'in12', 'toybox']
+DATASETS = ['mnist', 'mnist50', 'mnist-m', 'svhn', 'svhn-b', 'in12', 'toybox']
 
 
 class Experiment:
