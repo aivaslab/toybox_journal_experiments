@@ -20,9 +20,8 @@ class DatasetMNIST50(torchdata.Dataset):
     VAL_IMAGES_FILE = "../data/mnist50_val_images.npy"
     VAL_LABELS_FILE = "../data/mnist50_val_labels.npy"
     
-    def __init__(self, root, train, transform):
+    def __init__(self, train, transform):
         super(DatasetMNIST50, self).__init__()
-        self.root = root
         self.train = train
         self.transform = transform
         
@@ -52,7 +51,7 @@ if __name__ == "__main__":
         transforms.ToTensor(),
         transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)
     ])
-    dataset = DatasetMNIST50(train=True, transform=tr, root="")
+    dataset = DatasetMNIST50(train=True, transform=tr)
     print(len(dataset))
     dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=True)
     print(utils.online_mean_and_sd(dataloader))
