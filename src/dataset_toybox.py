@@ -11,8 +11,11 @@ import os
 import torchvision.transforms as transforms
 import torch.utils.data
 
-mean = (0.3499, 0.4374, 0.5199)
-std = (0.1623, 0.1894, 0.1775)
+import utils
+
+TOYBOX_MEAN = (0.3499, 0.4374, 0.5199)
+TOYBOX_STD = (0.1623, 0.1894, 0.1775)
+TOYBOX_DATA_PATH = "../data_12/Toybox/"
 
 toybox_classes = ["airplane", "ball", "car", "cat", "cup", "duck", "giraffe", "helicopter", "horse", "mug", "spoon",
                   "truck"]
@@ -218,16 +221,13 @@ class ToyboxSSL(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     trnsfrm = transforms.Compose([transforms.ToPILImage(), transforms.Resize((224, 224)),
-                                  transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4),
-                                  transforms.RandomHorizontalFlip()
-                                  # transforms.ToTensor(),
-                                  # transforms.Normalize(mean=mean, std=std)
+                                  # transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4),
+                                  # transforms.RandomHorizontalFlip()
+                                  transforms.ToTensor(),
+                                  transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)
                                   ])
-    dataset = ToyboxSSL(root="../../toybox_unsupervised_learning/data/", transform=trnsfrm,
-                        rng=np.random.default_rng(3), hypertune=False, train=True, num_instances=10,
-                        num_images_per_class=1000, views=("ryminus", "ryplus"))
-    print(len(dataset))
-    idx, (img1, img2) = dataset[0]
-    img1.show()
-    img2.show()
+    dataset = ToyboxDataset(root=TOYBOX_DATA_PATH, transform=trnsfrm, rng=np.random.default_rng(3), hypertune=False,
+                            train=False)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=128, shuffle=True)
+    print(utils.online_mean_and_sd(dataloader))
     

@@ -24,8 +24,8 @@ SVHN_STD = (0.1980, 0.2010, 0.1970)
 MNISTM_MEAN = (0.4082, 0.4621, 0.4579)
 MNISTM_STD = (0.2587, 0.2368, 0.2519)
 
-IN12_MEAN = (0.485, 0.456, 0.406)
-IN12_STD = (0.229, 0.224, 0.225)
+IN12_MEAN = (0.4541, 0.4845, 0.4980)
+IN12_STD = (0.2928, 0.2738, 0.2756)
 
 TOYBOX_MEAN = (0.3499, 0.4374, 0.5199)
 TOYBOX_STD = (0.1623, 0.1894, 0.1775)
@@ -232,3 +232,10 @@ class DatasetSVHN(torchdata.Dataset):
     def __getitem__(self, item):
         img, label = self.data[item]
         return item, img, label
+    
+
+if __name__ == "__main__":
+    for data in ["mnist", "mnist50", "mnist-m", "svhn", "svhn-b", "toybox", "in12"]:
+        dataset = prepare_dataset(data, args={'hypertune': False, "train": True, 'normalize': True})
+        dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=True)
+        print(data, utils.online_mean_and_sd(dataloader))

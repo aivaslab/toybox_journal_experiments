@@ -18,8 +18,8 @@ OFFICE31_DSLR_STD = (0.2025, 0.1949, 0.2067)
 OFFICE31_WEBCAM_MEAN = (0.6172, 0.6187, 0.6120)
 OFFICE31_WEBCAM_STD = (0.2589, 0.2568, 0.2519)
 
-IN12_MEAN = (0.485, 0.456, 0.406)
-IN12_STD = (0.229, 0.224, 0.225)
+IN12_MEAN = (0.4541, 0.4845, 0.4980)
+IN12_STD = (0.2928, 0.2738, 0.2756)
 
 TOYBOX_MEAN = (0.3499, 0.4374, 0.5199)
 TOYBOX_STD = (0.1623, 0.1894, 0.1775)
@@ -174,3 +174,10 @@ def prepare_dataset(d_name, args):
     
     dataset = get_dataset(d_name=d_name, args=args)
     return dataset
+
+
+if __name__ == "__main__":
+    for data in ["amazon", "dslr", "webcam", "toybox", "in12"]:
+        dataset = prepare_dataset(data, args={'hypertune': False, "train": True})
+        dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=True)
+        print(data, utils.online_mean_and_sd(dataloader))

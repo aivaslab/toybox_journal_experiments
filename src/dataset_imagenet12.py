@@ -5,6 +5,12 @@ import cv2
 import numpy as np
 import logging
 import torch.utils.data as torchdata
+import torchvision.transforms as transforms
+
+import utils
+
+IN12_MEAN = (0.4541, 0.4845, 0.4980)
+IN12_STD = (0.2928, 0.2738, 0.2756)
 
 
 class DataLoaderGeneric(torchdata.Dataset):
@@ -77,5 +83,12 @@ class DataLoaderGeneric(torchdata.Dataset):
 
 
 if __name__ == "__main__":
-    data = DataLoaderGeneric(root="../data_12/IN-12/", train=True, hypertune=True, fraction=0.01)
+    trnsfrm = transforms.Compose([transforms.ToPILImage(),
+                                  transforms.Resize(224),
+                                  transforms.ToTensor(),
+                                  transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
+                                  ])
+    data = DataLoaderGeneric(root="../data_12/IN-12/", train=True, hypertune=True, fraction=1.0, transform=trnsfrm)
     print(len(data))
+    dataloader = torchdata.DataLoader(data, batch_size=128, shuffle=True)
+    print(utils.online_mean_and_sd(dataloader))
