@@ -44,6 +44,9 @@ class BalancedSVHN(torchdata.Dataset):
     def __len__(self):
         return len(self.indices)
     
+    def __str__(self):
+        return "Balanced-SVHN"
+    
     
 if __name__ == "__main__":
     trnsfrm = transforms.Compose([

@@ -40,6 +40,9 @@ class DatasetMNIST50(torchdata.Dataset):
     
     def __len__(self):
         return len(self.labels)
+    
+    def __str__(self):
+        return "MNIST-50"
 
 
 if __name__ == "__main__":
