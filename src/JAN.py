@@ -122,21 +122,21 @@ class Experiment:
         self.net.classifier.train()
 
         total_batches = 0
-        loader_2_iter = iter(self.loader_2)
+        loader_1_iter = iter(self.loader_1)
         for ep in range(1, self.num_epochs + 1):
-            tqdm_bar = tqdm.tqdm(self.loader_1, ncols=150)
+            tqdm_bar = tqdm.tqdm(self.loader_2, ncols=150)
             ep_batches = 0
             ep_ce_loss = 0
             ep_jmmd_loss = 0
             ep_tot_loss = 0
-            for idx1, img1, labels1 in tqdm_bar:
+            for idx2, img2, labels2 in tqdm_bar:
                 try:
-                    idx2, img2, labels2 = next(loader_2_iter)
+                    idx1, img1, labels1 = next(loader_1_iter)
                 except StopIteration:
-                    loader_2_iter = iter(self.loader_2)
-                    idx2, img2, labels2 = next(loader_2_iter)
+                    loader_1_iter = iter(self.loader_1)
+                    idx1, img1, labels1 = next(loader_1_iter)
                 self.optimizer.zero_grad()
-                p = total_batches / (len(self.loader_1) * self.num_epochs)
+                p = total_batches / (len(self.loader_2) * self.num_epochs)
                 alfa = 2 / (1 + math.exp(-10 * p)) - 1
 
                 img1, labels1 = img1.cuda(), labels1.cuda()
