@@ -145,6 +145,9 @@ class DatasetToybox(torchdata.Dataset):
     def __getitem__(self, item):
         return self.dataset[item]
     
+    def __str__(self):
+        return "Toybox"
+        
 
 class DatasetIN12(torchdata.Dataset):
     """
@@ -160,6 +163,9 @@ class DatasetIN12(torchdata.Dataset):
     
     def __getitem__(self, item):
         return self.dataset[item]
+    
+    def __str__(self):
+        return "IN12"
 
 
 class DatasetMNISTM(torchdata.Dataset):
@@ -197,6 +203,9 @@ class DatasetMNISTM(torchdata.Dataset):
             img = self.transform(img)
         return item, img, label
     
+    def __str__(self):
+        return "MNIST-M"
+    
     
 class DatasetMNIST(torchdata.Dataset):
     """
@@ -214,6 +223,9 @@ class DatasetMNIST(torchdata.Dataset):
         img, label = self.data[item]
         return item, img, label
 
+    def __str__(self):
+        return "MNIST"
+    
 
 class DatasetSVHN(torchdata.Dataset):
     """
@@ -232,6 +244,9 @@ class DatasetSVHN(torchdata.Dataset):
     def __getitem__(self, item):
         img, label = self.data[item]
         return item, img, label
+    
+    def __str__(self):
+        return "SVHN"
     
 
 if __name__ == "__main__":

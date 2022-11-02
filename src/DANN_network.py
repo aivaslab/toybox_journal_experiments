@@ -50,6 +50,35 @@ class Network(nn.Module):
         return feats, logits, dom.squeeze()
 
 
+class MNIST50Network(Network):
+    """Network for the MNIST50 -> SVHN-B experiments"""
+    
+    def __init__(self):
+        super(MNIST50Network, self).__init__()
+        self.backbone = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(2, 2)), nn.Dropout(),
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(2, 2)), nn.Dropout(),
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=(3, 3), padding=0), nn.BatchNorm2d(512), nn.ReLU(),
+            nn.Conv2d(in_channels=512, out_channels=256, kernel_size=(1, 1), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=128, kernel_size=(1, 1), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.AvgPool2d(kernel_size=6)
+        )
+        
+        self.classifier = nn.Linear(in_features=128, out_features=10)
+        self.domain_classifier = nn.Sequential(nn.Linear(128, 512), nn.ReLU(),
+                                               nn.Dropout(),
+                                               nn.Linear(512, 512), nn.ReLU(),
+                                               nn.Dropout(),
+                                               nn.Linear(512, 1)
+                                               )
+
+
 class SVHNNetwork(Network):
     """
     Network for experiments with SVHN
@@ -151,7 +180,7 @@ def get_network(source_dataset, target_dataset, args):
     if source_dataset == 'svhn' or target_dataset == 'svhn':
         return SVHNNetwork()
     elif source_dataset == 'mnist50' and target_dataset == 'svhn-b':
-        return SVHNNetwork()
+        return MNIST50Network()
     elif 'mnist' in source_dataset and 'mnist' in target_dataset:
         return MNISTNetwork()
     elif 'toybox' in source_dataset or 'toybox' in target_dataset:
