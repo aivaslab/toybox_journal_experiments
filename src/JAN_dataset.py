@@ -9,7 +9,15 @@ import torch.utils.data as torchdata
 import torchvision.transforms as transforms
 
 import utils
+import dataset_mnist50
+import dataset_svhn_balanced
 
+
+MNIST_MEAN = (0.1307, 0.1307, 0.1307)
+MNIST_STD = (0.3081, 0.3081, 0.3081)
+
+SVHN_MEAN = (0.4377, 0.4437, 0.4728)
+SVHN_STD = (0.1980, 0.2010, 0.1970)
 
 OFFICE31_AMAZON_MEAN = (0.7841, 0.7862, 0.7923)
 OFFICE31_AMAZON_STD = (0.3201, 0.3182, 0.3157)
@@ -26,7 +34,7 @@ TOYBOX_STD = (0.1623, 0.1894, 0.1775)
 
 TOYBOX_DATA_PATH = "../data_12/Toybox/"
 IN12_DATA_PATH = "../data_12/IN-12/"
-DATASETS = ['amazon', 'dslr', 'webcam', 'toybox', 'in12']
+DATASETS = ['amazon', 'dslr', 'webcam', 'toybox', 'in12', "mnist50", "svhn-b"]
 
 
 class Office31(torchdata.Dataset):
@@ -127,6 +135,10 @@ def get_mean_std(dataset):
         mean, std = TOYBOX_MEAN, TOYBOX_STD
     elif dataset == 'in12':
         mean, std = IN12_MEAN, IN12_STD
+    elif dataset == "mnist50":
+        mean, std = MNIST_MEAN, MNIST_STD
+    elif dataset == "svhn-b":
+        mean, std = SVHN_MEAN, SVHN_STD
     else:
         raise NotImplementedError("Mean and std for dataset {} has not been specified".format(dataset))
     return mean, std
@@ -148,6 +160,16 @@ def get_transform(dataset, mean, std, args):
                                        transforms.Resize(224),
                                        transforms.ToTensor(),
                                        transforms.Normalize(mean=mean, std=std)])
+    if dataset == "mnist50":
+        trnsform = transforms.Compose([transforms.ToPILImage(),
+                                       transforms.Resize(32),
+                                       transforms.Grayscale(3),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize(mean=mean, std=std)])
+    if dataset == "svhn-b":
+        trnsform = transforms.Compose([transforms.Resize(32),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize(mean=mean, std=std)])
     return trnsform
 
 
@@ -163,6 +185,11 @@ def get_dataset(d_name, args):
         fr = 0.5 if args['hypertune'] else 1.0
         return DatasetIN12(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=fr,
                            hypertune=args['hypertune'])
+    elif d_name == 'mnist50':
+        return dataset_mnist50.DatasetMNIST50(train=args['train'], transform=args['transform'])
+    elif d_name == 'svhn-b':
+        return dataset_svhn_balanced.BalancedSVHN(root='../data/', train=args['train'], transform=args['transform'],
+                                                  hypertune=args['hypertune'])
     raise NotImplementedError("Transform for dataset {} has not been specified".format(d_name))
 
 
@@ -177,7 +204,7 @@ def prepare_dataset(d_name, args):
 
 
 if __name__ == "__main__":
-    for data in ["amazon", "dslr", "webcam", "toybox", "in12"]:
-        dataset = prepare_dataset(data, args={'hypertune': False, "train": True})
-        dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=True)
+    for data in ["mnist50", "svhn-b"]:
+        dset = prepare_dataset(data, args={'hypertune': False, "train": True})
+        dataloader = torchdata.DataLoader(dset, batch_size=64, shuffle=True)
         print(data, utils.online_mean_and_sd(dataloader))

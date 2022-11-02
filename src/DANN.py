@@ -93,7 +93,7 @@ class Experiment:
         Returns the lr of the current batch
         """
         if 'toybox' not in self.source_dataset and 'toybox' not in self.target_dataset:
-            mu_0, alpha, beta = 0.01, 10, 0.75
+            mu_0, alpha, beta = self.starting_lr, 10, 0.75
             if self.lr_anneal:
                 lr = mu_0 / ((1 + alpha * p) ** beta)
             else:
