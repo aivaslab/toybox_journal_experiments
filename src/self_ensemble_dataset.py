@@ -96,6 +96,8 @@ def get_dataset(d_name, args):
         return DatasetSVHN(transform=args['transform'], train=args['train'])
     
     if d_name == 'svhn-b':
+        if args['target']:
+            return DatasetSVHNBPair(train=args['train'], transform=args['transform'], hypertune=args['hypertune'])
         return DatasetSVHNB(train=args['train'], transform=args['transform'], hypertune=args['hypertune'])
     if d_name == 'in12':
         fr = 0.5 if args['hypertune'] else 1.0
@@ -171,7 +173,7 @@ class DatasetMNIST50(torchdata.Dataset):
         self.aug = self_ensemble_aug.get_aug_for_mnist()
     
     def __len__(self):
-        return len(self.data)
+        return len(self.dataset)
     
     def __getitem__(self, item):
         item, img, label = self.dataset[item]
@@ -197,16 +199,43 @@ class DatasetSVHNB(torchdata.Dataset):
         self.aug = self_ensemble_aug.get_aug_for_mnist()
     
     def __len__(self):
-        return len(self.data)
+        return len(self.dataset)
     
     def __getitem__(self, item):
-        item, img, label = self.data[item]
+        item, img, label = self.dataset[item]
         if False and self.train:
             img = self.aug.augment(img.unsqueeze(0))
         return item, img.squeeze(), label
     
     def __str__(self):
         return "Balanced SVHN"
+
+
+class DatasetSVHNBPair(torchdata.Dataset):
+    """
+    Dataset Class for SVHN
+    """
+    
+    def __init__(self, train, transform, hypertune):
+        self.train = train
+        self.transform = transform
+        self.hypertune = hypertune
+        self.dataset = dataset_svhn_balanced.BalancedSVHN(root='../data/', train=self.train, transform=None,
+                                                          hypertune=self.hypertune)
+        self.aug = self_ensemble_aug.get_aug_for_mnist()
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, item):
+        item, img, label = self.dataset[item]
+        img1, img2 = self.transform(img), self.transform(img)
+        img1, img2 = self.aug.augment(img1.unsqueeze(0)), self.aug.augment(img2.unsqueeze(0))
+        img1, img2 = img1.squeeze(), img2.squeeze()
+        return item, (img1, img2), label
+    
+    def __str__(self):
+        return "Balanced SVHN Pair"
 
 
 class DatasetMNIST(torchdata.Dataset):
