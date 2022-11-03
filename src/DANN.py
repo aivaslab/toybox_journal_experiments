@@ -49,9 +49,13 @@ class Experiment:
                         }
         self.dataset1 = DANNDatasets.prepare_dataset(self.source_dataset, args=dataset_args)
         self.dataset2 = DANNDatasets.prepare_dataset(self.target_dataset, args=dataset_args)
+        print("{} -> {}".format(str(self.dataset1), str(self.dataset2)))
+        print("{} -> {}".format(len(self.dataset1), len(self.dataset2)))
 
-        self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4)
-        self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4)
+        self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4,
+                                             drop_last=True)
+        self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4,
+                                             drop_last=True)
 
         dataset_args['train'] = False
         self.test_dataset1 = DANNDatasets.prepare_dataset(self.source_dataset, args=dataset_args)
@@ -74,11 +78,11 @@ class Experiment:
 
         import datetime
         self.exp_time = datetime.datetime.now()
-        runs_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
-                             + self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
-        self.tb_writer = tb.SummaryWriter(log_dir=runs_path)
-        print("Saving experiment tracking data to {}...".format(runs_path))
-        self.save_args(path=runs_path)
+        self.runs_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
+                                  + self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
+        self.tb_writer = tb.SummaryWriter(log_dir=self.runs_path)
+        print("Saving experiment tracking data to {}...".format(self.runs_path))
+        self.save_args(path=self.runs_path)
 
     def save_args(self, path):
         """Save the experiment args in json file"""
@@ -99,7 +103,13 @@ class Experiment:
             else:
                 lr = mu_0
         else:
-            lr = 0.5 * self.starting_lr * (1 + math.cos(math.pi * p))
+            total_batches = len(self.loader_2) * self.num_epochs
+            batches = int(p * total_batches)
+            if batches < 2 * len(self.loader_2):
+                lr = (batches + 1) * self.starting_lr / (2 * len(self.loader_2))
+            else:
+                p = (batches - 2 * len(self.loader_2)) / (total_batches - 2 * len(self.loader_2))
+                lr = 0.5 * self.starting_lr * (1 + math.cos(math.pi * p))
         return lr
 
     def train(self):
@@ -125,6 +135,16 @@ class Experiment:
                 except StopIteration:
                     loader_1_iter = iter(self.loader_1)
                     idx1, img1, labels1 = next(loader_1_iter)
+
+                if total_batches == 0:
+                    mean, std = DANNDatasets.get_mean_std(dataset=self.source_dataset)
+                    src_images = utils.get_images(images=img1, mean=mean, std=std)
+                    src_images.save(self.runs_path + "source_images_batch_1.png")
+    
+                    mean, std = DANNDatasets.get_mean_std(dataset=self.target_dataset)
+                    trgt_images_1 = utils.get_images(images=img2, mean=mean, std=std)
+                    trgt_images_1.save(self.runs_path + "target_images_batch_1.png")
+                    
                 self.optimizer.zero_grad()
 
                 p = total_batches / (len(self.loader_2) * self.num_epochs)
@@ -188,6 +208,7 @@ class Experiment:
                                                             },
                                            global_step=total_batches)
 
+                p = total_batches / (len(self.loader_2) * self.num_epochs)
                 next_lr = self.get_lr(p=p)
                 for idx_group in range(len(self.optimizer.param_groups)):
                     wt = 1 if idx_group > 0 else self.backbone_lr_wt
