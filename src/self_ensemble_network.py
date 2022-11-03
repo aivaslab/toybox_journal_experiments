@@ -2,7 +2,9 @@
 Network for experiments with the Self-Ensemble model
 """
 import torch.nn as nn
-import torch.nn.functional as functional
+import torchvision.models as models
+import torch
+import os
 
 
 class MNIST50Network(nn.Module):
@@ -48,157 +50,60 @@ class MNIST50Network(nn.Module):
         self.classifier.eval()
 
 
-class Network(nn.Module):
-    """
-    Backbone network for mean teacher model
-    Code sourced from: https://github.com/Britefury/self-ensemble-visual-domain-adapt
-    """
+class ToyboxNetwork(nn.Module):
+    """Network for Self-ensemble experiments for Toybox->IN-12"""
     
-    def __init__(self, n_classes):
-        super().__init__()
-        raise NotImplementedError
-        self.conv1_1 = nn.Conv2d(3, 128, (3, 3), padding=1)
-        self.conv1_1_bn = nn.BatchNorm2d(128)
-        self.conv1_2 = nn.Conv2d(128, 128, (3, 3), padding=1)
-        self.conv1_2_bn = nn.BatchNorm2d(128)
-        self.conv1_3 = nn.Conv2d(128, 128, (3, 3), padding=1)
-        self.conv1_3_bn = nn.BatchNorm2d(128)
-        self.pool1 = nn.MaxPool2d((2, 2))
-        self.drop1 = nn.Dropout()
-        
-        self.conv2_1 = nn.Conv2d(128, 256, (3, 3), padding=1)
-        self.conv2_1_bn = nn.BatchNorm2d(256)
-        self.conv2_2 = nn.Conv2d(256, 256, (3, 3), padding=1)
-        self.conv2_2_bn = nn.BatchNorm2d(256)
-        self.conv2_3 = nn.Conv2d(256, 256, (3, 3), padding=1)
-        self.conv2_3_bn = nn.BatchNorm2d(256)
-        self.pool2 = nn.MaxPool2d((2, 2))
-        self.drop2 = nn.Dropout()
-        
-        self.conv3_1 = nn.Conv2d(256, 512, (3, 3), padding=0)
-        self.conv3_1_bn = nn.BatchNorm2d(512)
-        self.nin3_2 = nn.Conv2d(512, 256, (1, 1), padding=1)
-        self.nin3_2_bn = nn.BatchNorm2d(256)
-        self.nin3_3 = nn.Conv2d(256, 128, (1, 1), padding=1)
-        self.nin3_3_bn = nn.BatchNorm2d(128)
-        
-        self.fc4 = nn.Linear(128, n_classes)
+    def __init__(self, backbone_file, num_classes):
+        super(ToyboxNetwork, self).__init__()
+        self.backbone_file = backbone_file
+        self.validate_backbone_file()
+        self.num_classes = num_classes
+        if self.backbone_file == "imagenet":
+            print("Loading backbone weights from ILSVRC trained model...")
+            self.backbone = models.resnet18(pretrained=True)
+        else:
+            print("Initializing new backbone...")
+            self.backbone = models.resnet18(pretrained=False)
+        self.fc_size = self.backbone.fc.in_features
+        self.backbone.fc = nn.Identity()
+        self.classifier = nn.Linear(self.fc_size, self.num_classes)
+        if self.backbone_file != "" and self.backbone_file != "imagenet":
+            print("Loading backbone weights from {}...".format(self.backbone_file))
+            self.backbone.load_state_dict(torch.load(self.backbone_file))
     
     def forward(self, x):
-        """Forward prop for the network"""
-        x = functional.relu(self.conv1_1_bn(self.conv1_1(x)))
-        x = functional.relu(self.conv1_2_bn(self.conv1_2(x)))
-        x = self.pool1(functional.relu(self.conv1_3_bn(self.conv1_3(x))))
-        x = self.drop1(x)
-        
-        x = functional.relu(self.conv2_1_bn(self.conv2_1(x)))
-        x = functional.relu(self.conv2_2_bn(self.conv2_2(x)))
-        x = self.pool2(functional.relu(self.conv2_3_bn(self.conv2_3(x))))
-        x = self.drop2(x)
-        
-        x = functional.relu(self.conv3_1_bn(self.conv3_1(x)))
-        x = functional.relu(self.nin3_2_bn(self.nin3_2(x)))
-        x = functional.relu(self.nin3_3_bn(self.nin3_3(x)))
-        
-        x = functional.avg_pool2d(x, 6)
-        x = x.view(-1, 128)
-        
-        x = self.fc4(x)
-        return x
+        """
+        Forward method for network
+        """
+        feats = self.backbone(x)
+        feats_view = feats.view(feats.size(0), -1)
+        logits = self.classifier(feats_view)
+        return logits
     
-    def get_params(self, frozen_layers):
-        """
-        Returns the parameters from the un-frozen layers
-        """
-        params = nn.ParameterList()
-        params.extend(self.fc4.parameters())
-        if frozen_layers < 3:
-            params.extend(self.conv3_1.parameters())
-            params.extend(self.conv3_1_bn.parameters())
-            params.extend(self.nin3_2.parameters())
-            params.extend(self.nin3_2_bn.parameters())
-            params.extend(self.nin3_3.parameters())
-            params.extend(self.nin3_3_bn.parameters())
-        
-        if frozen_layers < 2:
-            params.extend(self.conv2_1.parameters())
-            params.extend(self.conv2_1_bn.parameters())
-            params.extend(self.conv2_2.parameters())
-            params.extend(self.conv2_2_bn.parameters())
-            params.extend(self.conv2_3.parameters())
-            params.extend(self.conv2_3_bn.parameters())
-            params.extend(self.pool2.parameters())
-            params.extend(self.drop2.parameters())
-        
-        if frozen_layers < 1:
-            params.extend(self.conv1_1.parameters())
-            params.extend(self.conv1_1_bn.parameters())
-            params.extend(self.conv1_2.parameters())
-            params.extend(self.conv1_2_bn.parameters())
-            params.extend(self.conv1_3.parameters())
-            params.extend(self.conv1_3_bn.parameters())
-            params.extend(self.pool1.parameters())
-            params.extend(self.drop1.parameters())
-        return params
+    def validate_backbone_file(self):
+        """Validate backbone file"""
+        if self.backbone_file != "" and self.backbone_file != "imagenet" and not os.path.isfile(self.backbone_file):
+            self.backbone_file = ""
+        return
     
     def set_train_mode(self):
-        """
-        Set all params in training mode
-        """
-        self.conv1_1.train()
-        self.conv1_1_bn.train()
-        self.conv1_2.train()
-        self.conv1_2_bn.train()
-        self.conv1_3.train()
-        self.conv1_3_bn.train()
-        self.pool1.train()
-        self.drop1.train()
-        
-        self.conv2_1.train()
-        self.conv2_1_bn.train()
-        self.conv2_2.train()
-        self.conv2_2_bn.train()
-        self.conv2_3.train()
-        self.conv2_3_bn.train()
-        self.pool2.train()
-        self.drop2.train()
-        
-        self.conv3_1.train()
-        self.conv3_1_bn.train()
-        self.nin3_2.train()
-        self.nin3_2_bn.train()
-        self.nin3_3.train()
-        self.nin3_3_bn.train()
-        
-        self.fc4.train()
-    
+        """Set network parameters in train mode"""
+        self.backbone.train()
+        self.classifier.train()
+
     def set_eval_mode(self):
-        """
-        Set all params in eval mode
-        """
-        self.conv1_1.eval()
-        self.conv1_1_bn.eval()
-        self.conv1_2.eval()
-        self.conv1_2_bn.eval()
-        self.conv1_3.eval()
-        self.conv1_3_bn.eval()
-        self.pool1.eval()
-        self.drop1.eval()
-        
-        self.conv2_1.eval()
-        self.conv2_1_bn.eval()
-        self.conv2_2.eval()
-        self.conv2_2_bn.eval()
-        self.conv2_3.eval()
-        self.conv2_3_bn.eval()
-        self.pool2.eval()
-        self.drop2.eval()
-        
-        self.conv3_1.eval()
-        self.conv3_1_bn.eval()
-        self.nin3_2.eval()
-        self.nin3_2_bn.eval()
-        self.nin3_3.eval()
-        self.nin3_3_bn.eval()
-        
-        self.fc4.eval()
+        """Set network parameters in eval mode"""
+        self.backbone.eval()
+        self.classifier.eval()
+
+
+def get_network(source, args):
+    """
+    Return appropriate dataset based on source dataset
+    """
+    if 'mnist' in source:
+        return MNIST50Network()
+    elif 'toybox' in source:
+        return ToyboxNetwork(backbone_file=args['backbone'], num_classes=12)
+    else:
+        raise NotImplementedError("Network for source dataset {} not implemented...".format(source))

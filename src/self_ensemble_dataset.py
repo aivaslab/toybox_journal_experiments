@@ -101,6 +101,9 @@ def get_dataset(d_name, args):
         return DatasetSVHNB(train=args['train'], transform=args['transform'], hypertune=args['hypertune'])
     if d_name == 'in12':
         fr = 0.5 if args['hypertune'] else 1.0
+        if args['target']:
+            return DatasetIN12Pair(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=fr,
+                                   hypertune=args['hypertune'])
         return DatasetIN12(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=fr,
                            hypertune=args['hypertune'])
     if d_name == "toybox":
@@ -159,6 +162,29 @@ class DatasetIN12(torchdata.Dataset):
     
     def __str__(self):
         return "IN12"
+
+
+class DatasetIN12Pair(torchdata.Dataset):
+    """
+    Class definition for IN-12 dataset
+    """
+    
+    def __init__(self, root, train, transform, fraction, hypertune):
+        self.transform = transform
+        import dataset_imagenet12
+        self.dataset = dataset_imagenet12.DataLoaderGeneric(root=root, train=train, transform=None,
+                                                            fraction=fraction, hypertune=hypertune)
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, item):
+        idx, img, label = self.dataset[item]
+        img1, img2 = self.transform(img), self.transform(img)
+        return idx, (img1, img2), label
+    
+    def __str__(self):
+        return "IN12 Pair"
 
 
 class DatasetMNIST50(torchdata.Dataset):

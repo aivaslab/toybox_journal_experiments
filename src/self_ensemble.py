@@ -18,7 +18,7 @@ import self_ensemble_dataset
 
 OUT_DIR = "../out/Self-Ensemble/"
 RUNS_DIR = "../runs/Self-Ensemble/"
-DATASETS = ['mnist50', 'svhn-b', 'mnist', 'svhn']
+DATASETS = ['mnist50', 'svhn-b', 'mnist', 'svhn', 'toybox', 'in12']
 
 
 def robust_binary_crossentropy(pred, tgt):
@@ -90,9 +90,12 @@ class Experiment:
         self.debug = self.args['debug']
         self.class_balance = self.args['class_balance']
         
-        self.teacher = self_ensemble_network.MNIST50Network()
-        self.student = self_ensemble_network.MNIST50Network()
-        self.teacher.load_state_dict(self.student.state_dict())
+        network_args = {'backbone': self.backbone}
+        self.teacher = self_ensemble_network.get_network(source=self.source_dataset, args=network_args)
+        self.student = self_ensemble_network.get_network(source=self.source_dataset, args=network_args)
+        self.teacher.backbone.load_state_dict(self.student.backbone.state_dict())
+        self.teacher.classifier.load_state_dict(self.student.classifier.state_dict())
+        
         for params in self.teacher.backbone.parameters():
             params.requires_grad = False
         for params in self.teacher.classifier.parameters():
