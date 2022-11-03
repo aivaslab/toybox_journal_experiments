@@ -88,7 +88,7 @@ def get_dataset(d_name, args):
         return DatasetMNIST(transform=args['transform'], train=args['train'])
     
     if d_name == 'mnist50':
-        return dataset_mnist50.DatasetMNIST50(train=args['train'], transform=args['transform'])
+        return DatasetMNIST50(train=args['train'], transform=args['transform'])
     
     if d_name == 'svhn':
         if args['target']:
@@ -96,8 +96,7 @@ def get_dataset(d_name, args):
         return DatasetSVHN(transform=args['transform'], train=args['train'])
     
     if d_name == 'svhn-b':
-        return dataset_svhn_balanced.BalancedSVHN(root='../data/', train=args['train'], transform=args['transform'],
-                                                  hypertune=args['hypertune'])
+        return DatasetSVHNB(train=args['train'], transform=args['transform'], hypertune=args['hypertune'])
     if d_name == 'in12':
         fr = 0.5 if args['hypertune'] else 1.0
         return DatasetIN12(root=IN12_DATA_PATH, train=args['train'], transform=args['transform'], fraction=fr,
@@ -160,6 +159,56 @@ class DatasetIN12(torchdata.Dataset):
         return "IN12"
 
 
+class DatasetMNIST50(torchdata.Dataset):
+    """
+    Dataset Class for MNIST
+    """
+    
+    def __init__(self, train, transform):
+        self.train = train
+        self.transform = transform
+        self.dataset = dataset_mnist50.DatasetMNIST50(train=self.train, transform=self.transform)
+        self.aug = self_ensemble_aug.get_aug_for_mnist()
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, item):
+        item, img, label = self.dataset[item]
+        if self.train:
+            img = self.aug.augment((img.unsqueeze(0)))
+        return item, img.squeeze(), label
+    
+    def __str__(self):
+        return "MNIST"
+
+
+class DatasetSVHNB(torchdata.Dataset):
+    """
+    Dataset Class for SVHN
+    """
+    
+    def __init__(self, train, transform, hypertune):
+        self.train = train
+        self.transform = transform
+        self.hypertune = hypertune
+        self.dataset = dataset_svhn_balanced.BalancedSVHN(root='../data/', train=self.train, transform=self.transform,
+                                                          hypertune=self.hypertune)
+        self.aug = self_ensemble_aug.get_aug_for_mnist()
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, item):
+        item, img, label = self.data[item]
+        if False and self.train:
+            img = self.aug.augment(img.unsqueeze(0))
+        return item, img.squeeze(), label
+    
+    def __str__(self):
+        return "Balanced SVHN"
+
+
 class DatasetMNIST(torchdata.Dataset):
     """
     Dataset Class for MNIST
@@ -201,7 +250,7 @@ class DatasetSVHN(torchdata.Dataset):
     
     def __getitem__(self, item):
         img, label = self.data[item]
-        if False and self.train:
+        if self.train:
             img = self.aug.augment(img.unsqueeze(0))
         return item, img.squeeze(), label
     
@@ -218,7 +267,7 @@ class DatasetSVHNPair(torchdata.Dataset):
         self.train = train
         self.split = 'train' if self.train else 'test'
         self.transform = transform
-        self.data = datasets.SVHN(root="../data/", split=self.split, transform=self.transform, download=True)
+        self.data = datasets.SVHN(root="../data/", split=self.split, transform=None, download=True)
         self.aug = self_ensemble_aug.get_aug_for_mnist()
     
     def __len__(self):
@@ -226,7 +275,8 @@ class DatasetSVHNPair(torchdata.Dataset):
     
     def __getitem__(self, item):
         img, label = self.data[item]
-        img1, img2 = self.aug.augment_pair(img.unsqueeze(0))
+        img1, img2 = self.transform(img), self.transform(img)
+        img1, img2 = self.aug.augment(img1.unsqueeze(0)), self.aug.augment(img2.unsqueeze(0))
         img1, img2 = img1.squeeze(), img2.squeeze()
         return item, (img1, img2), label
     
