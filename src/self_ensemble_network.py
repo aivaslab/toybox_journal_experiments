@@ -5,6 +5,49 @@ import torch.nn as nn
 import torch.nn.functional as functional
 
 
+class MNIST50Network(nn.Module):
+    """Network for the MNIST50 -> SVHN-B experiments"""
+    def __init__(self):
+        super(MNIST50Network, self).__init__()
+        self.backbone = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(2, 2)), nn.Dropout(),
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(2, 2)), nn.Dropout(),
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=(3, 3), padding=0), nn.BatchNorm2d(512), nn.ReLU(),
+            nn.Conv2d(in_channels=512, out_channels=256, kernel_size=(1, 1), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=128, kernel_size=(1, 1), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.AvgPool2d(kernel_size=6)
+            )
+        
+        self.classifier = nn.Linear(in_features=128, out_features=10)
+        
+    def forward(self, x):
+        """Forward prop for the network"""
+        feats = self.backbone.forward(x)
+        feats_view = feats.view(feats.size(0), -1)
+        logits = self.classifier(feats_view)
+        return logits
+
+    def set_train_mode(self):
+        """
+        Set all params in training mode
+        """
+        self.backbone.train()
+        self.classifier.train()
+
+    def set_eval_mode(self):
+        """
+        Set all params in training mode
+        """
+        self.backbone.eval()
+        self.classifier.eval()
+
+
 class Network(nn.Module):
     """
     Backbone network for mean teacher model
@@ -13,7 +56,7 @@ class Network(nn.Module):
     
     def __init__(self, n_classes):
         super().__init__()
-        
+        raise NotImplementedError
         self.conv1_1 = nn.Conv2d(3, 128, (3, 3), padding=1)
         self.conv1_1_bn = nn.BatchNorm2d(128)
         self.conv1_2 = nn.Conv2d(128, 128, (3, 3), padding=1)
