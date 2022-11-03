@@ -248,9 +248,31 @@ class DatasetSVHN(torchdata.Dataset):
     def __str__(self):
         return "SVHN"
     
+    
+def check():
+    """Method to test dataset implementation"""
+    trnsfrms = transforms.Compose([transforms.ToPILImage(),
+                                   transforms.Resize(32),
+                                   transforms.Grayscale(3),
+                                   transforms.ToTensor(),
+                                   transforms.Normalize(mean=MNIST_MEAN, std=MNIST_STD)])
+    dataset = dataset_mnist50.DatasetMNIST50(train=True, transform=trnsfrms)
+    dataloader = torchdata.DataLoader(dataset, batch_size=50, shuffle=False)
+    _, images, _ = next(iter(dataloader))
+    ims = utils.get_images(images=images, mean=MNIST_MEAN, std=MNIST_STD, aug=True)
+    ims.show()
+
+    trnsfrms = transforms.Compose([transforms.ToPILImage(),
+                                   transforms.Resize(32),
+                                   transforms.Grayscale(3),
+                                   transforms.ToTensor()
+                                   ])
+    dataset = dataset_mnist50.DatasetMNIST50(train=True, transform=trnsfrms)
+    dataloader = torchdata.DataLoader(dataset, batch_size=50, shuffle=False)
+    _, images, _ = next(iter(dataloader))
+    ims = utils.get_images(images=images, mean=MNIST_MEAN, std=MNIST_STD, aug=False)
+    ims.show()
+
 
 if __name__ == "__main__":
-    for data in ["mnist", "mnist50", "mnist-m", "svhn", "svhn-b", "toybox", "in12"]:
-        dataset = prepare_dataset(data, args={'hypertune': False, "train": True, 'normalize': True})
-        dataloader = torchdata.DataLoader(dataset, batch_size=64, shuffle=True)
-        print(data, utils.online_mean_and_sd(dataloader))
+    check()
