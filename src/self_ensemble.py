@@ -110,6 +110,7 @@ class Experiment:
         dataset_args['target'] = True
         self.dataset2 = self_ensemble_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
         print("{} -> {}".format(str(self.dataset1), str(self.dataset2)))
+        print("{} -> {}".format(len(self.dataset1), len(self.dataset2)))
         
         self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4,
                                              drop_last=True)

@@ -191,7 +191,7 @@ class DatasetSVHNB(torchdata.Dataset):
         return idx, img.squeeze(), label
     
     def __str__(self):
-        return "MNIST50"
+        return "SVHN-B"
 
 
 class DatasetToybox(torchdata.Dataset):
