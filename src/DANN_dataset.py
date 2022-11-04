@@ -9,6 +9,7 @@ import numpy as np
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
+import self_ensemble_aug
 import utils
 import dataset_mnist50
 import dataset_svhn_balanced
@@ -51,7 +52,7 @@ def get_mean_std(dataset):
     return mean, std
 
 
-def get_transform(dataset, mean, std):
+def get_transform(dataset, mean, std, train):
     """Return the image transform for the specified dataset"""
     trnsfrms = [transforms.Resize(32), transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]
     if dataset == 'mnist':
@@ -71,20 +72,36 @@ def get_transform(dataset, mean, std):
                     transforms.ToTensor(),
                     transforms.Normalize(mean=mean, std=std)]
     elif dataset == 'toybox':
-        trnsfrms = [transforms.ToPILImage(),
-                    transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0.5, brightness=0.3),
-                    transforms.Resize(224),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)
-                    ]
+        if train:
+            trnsfrms = [transforms.ToPILImage(),
+                        transforms.Resize(256),
+                        transforms.RandomResizedCrop(size=224),
+                        transforms.ColorJitter(hue=0.3, contrast=0.5, saturation=0.5, brightness=0.3),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)
+                        ]
+        else:
+            trnsfrms = [transforms.ToPILImage(),
+                        transforms.Resize(224),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=TOYBOX_MEAN, std=TOYBOX_STD)
+                        ]
     elif dataset == "in12":
-        trnsfrms = [transforms.ToPILImage(),
-                    transforms.ColorJitter(hue=0.2, contrast=0.5, saturation=0, brightness=0.3),
-                    transforms.Resize(224),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
-                    ]
+        if train:
+            trnsfrms = [transforms.ToPILImage(),
+                        transforms.Resize(256),
+                        transforms.RandomResizedCrop(size=224),
+                        transforms.ColorJitter(hue=0.5, contrast=0.5, saturation=0.4, brightness=0.3),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)
+                        ]
+        else:
+            trnsfrms = [transforms.ToPILImage(),
+                        transforms.Resize(224),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)]
     else:
         raise NotImplementedError("Transform for dataset {} not specified...".format(dataset))
     transform = transforms.Compose(trnsfrms)
@@ -96,12 +113,12 @@ def get_dataset(d_name, args):
     if d_name == 'mnist':
         return DatasetMNIST(transform=args['transform'], train=args['train'])
     if d_name == 'mnist50':
-        return dataset_mnist50.DatasetMNIST50(train=args['train'], transform=args['transform'])
+        return DatasetMNIST50(train=args['train'], transform=args['transform'], special_aug=args['special_aug'])
     if d_name == 'svhn':
         return DatasetSVHN(transform=args['transform'], train=args['train'])
     if d_name == 'svhn-b':
-        return dataset_svhn_balanced.BalancedSVHN(root='../data/', train=args['train'], transform=args['transform'],
-                                                  hypertune=args['hypertune'])
+        return DatasetSVHNB(train=args['train'], transform=args['transform'], hypertune=args['hypertune'],
+                            special_aug=args['special_aug'])
     if d_name == 'mnist-m':
         return DatasetMNISTM(train=args['train'], transform=args['transform'])
     if d_name == 'in12':
@@ -122,10 +139,59 @@ def prepare_dataset(d_name, args):
 
     if not args['normalize']:
         std = UNIT_STD
-    args['transform'] = get_transform(d_name, mean, std)
+    args['transform'] = get_transform(d_name, mean, std, train=args['train'])
     
     dataset = get_dataset(d_name=d_name, args=args)
     return dataset
+
+
+class DatasetMNIST50(torchdata.Dataset):
+    """
+    Class definition for MNIST50
+    """
+    
+    def __init__(self, train, transform, special_aug):
+        self.train = train
+        self.special_aug = special_aug
+        self.aug = self_ensemble_aug.get_aug_for_mnist()
+        self.dataset = dataset_mnist50.DatasetMNIST50(train=train, transform=transform)
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, item):
+        idx, img, label = self.dataset[item]
+        if self.special_aug is True and self.train is True:
+            img = self.aug.augment(img.unsqueeze(0))
+        return idx, img.squeeze(), label
+    
+    def __str__(self):
+        return "MNIST50"
+
+
+class DatasetSVHNB(torchdata.Dataset):
+    """
+    Class definition for BalancedSVHN dataset
+    """
+    
+    def __init__(self, train, transform, hypertune, special_aug):
+        self.train = train
+        self.special_aug = special_aug
+        self.aug = self_ensemble_aug.get_aug_for_mnist()
+        self.dataset = dataset_svhn_balanced.BalancedSVHN(root='../data/', train=train, transform=transform,
+                                                          hypertune=hypertune)
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, item):
+        idx, img, label = self.dataset[item]
+        if self.special_aug is True and self.train is True:
+            img = self.aug.augment(img.unsqueeze(0))
+        return idx, img.squeeze(), label
+    
+    def __str__(self):
+        return "MNIST50"
 
 
 class DatasetToybox(torchdata.Dataset):

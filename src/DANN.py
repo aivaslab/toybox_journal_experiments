@@ -10,6 +10,7 @@ import torch.utils.tensorboard as tb
 import math
 import argparse
 import os
+import csv
 
 import utils
 import DANN_network as DANNNetworks
@@ -38,6 +39,7 @@ class Experiment:
         self.starting_lr = self.args['starting_lr']
         self.hypertune = not self.args['final']
         self.b_size = self.args['batchsize']
+        self.mnist_special_aug = not self.args['mnist_default_aug']
 
         net_args = {'backbone': self.backbone}
         self.net = DANNNetworks.get_network(source_dataset=self.source_dataset, target_dataset=self.target_dataset,
@@ -45,7 +47,8 @@ class Experiment:
 
         dataset_args = {'normalize': self.normalize,
                         'train': True,
-                        'hypertune': self.hypertune
+                        'hypertune': self.hypertune,
+                        'special_aug': self.mnist_special_aug
                         }
         self.dataset1 = DANNDatasets.prepare_dataset(self.source_dataset, args=dataset_args)
         self.dataset2 = DANNDatasets.prepare_dataset(self.target_dataset, args=dataset_args)
@@ -64,6 +67,10 @@ class Experiment:
         self.test_loader_1 = torchdata.DataLoader(self.test_dataset1, batch_size=2 * self.b_size, num_workers=4)
         self.test_loader_2 = torchdata.DataLoader(self.test_dataset2, batch_size=2 * self.b_size, num_workers=4)
 
+        self.dataloaders = [self.loader_1, self.test_loader_1, self.loader_2, self.test_loader_2]
+        self.d_names = [self.source_dataset + "_train", self.source_dataset + "_test", self.target_dataset + "_train",
+                        self.target_dataset + "_test"]
+        
         self.net = self.net.cuda()
         if ('toybox' in self.source_dataset or 'toybox' in self.target_dataset) and self.net.backbone_file != "":
             self.backbone_lr_wt = 0.1
@@ -83,6 +90,7 @@ class Experiment:
         self.tb_writer = tb.SummaryWriter(log_dir=self.runs_path)
         print("Saving experiment tracking data to {}...".format(self.runs_path))
         self.save_args(path=self.runs_path)
+        self.save_batch_images()
 
     def save_args(self, path):
         """Save the experiment args in json file"""
@@ -91,7 +99,25 @@ class Experiment:
         out_file = open(path + "exp_args.json", "w")
         out_file.write(json_args)
         out_file.close()
+        
+    def save_batch_images(self):
+        """Save one batch of images for all dataloaders"""
+        mean, std = DANNDatasets.get_mean_std(dataset=self.source_dataset)
+        _, img1, _ = next(iter(self.loader_1))
+        src_images = utils.get_images(images=img1, mean=mean, std=std)
+        src_images.save(self.runs_path + "source_images_train.png")
+        _, img2, _ = next(iter(self.test_loader_1))
+        src_images = utils.get_images(images=img2, mean=mean, std=std)
+        src_images.save(self.runs_path + "source_images_test.png")
 
+        mean, std = DANNDatasets.get_mean_std(dataset=self.target_dataset)
+        _, img1, _ = next(iter(self.loader_2))
+        src_images = utils.get_images(images=img1, mean=mean, std=std)
+        src_images.save(self.runs_path + "target_images_train.png")
+        _, img2, _ = next(iter(self.test_loader_2))
+        src_images = utils.get_images(images=img2, mean=mean, std=std)
+        src_images.save(self.runs_path + "target_images_test.png")
+        
     def get_lr(self, p):
         """
         Returns the lr of the current batch
@@ -135,15 +161,6 @@ class Experiment:
                 except StopIteration:
                     loader_1_iter = iter(self.loader_1)
                     idx1, img1, labels1 = next(loader_1_iter)
-
-                if total_batches == 0:
-                    mean, std = DANNDatasets.get_mean_std(dataset=self.source_dataset)
-                    src_images = utils.get_images(images=img1, mean=mean, std=std)
-                    src_images.save(self.runs_path + "source_images_batch_1.png")
-    
-                    mean, std = DANNDatasets.get_mean_std(dataset=self.target_dataset)
-                    trgt_images_1 = utils.get_images(images=img2, mean=mean, std=std)
-                    trgt_images_1.save(self.runs_path + "target_images_batch_1.png")
                     
                 self.optimizer.zero_grad()
 
@@ -263,14 +280,16 @@ class Experiment:
         self.net.backbone.eval()
         self.net.classifier.eval()
         self.net.domain_classifier.eval()
-        dataloaders = [self.loader_1, self.test_loader_1, self.loader_2, self.test_loader_2]
-        d_names = [self.source_dataset + "_train", self.source_dataset + "_test", self.target_dataset + "_train",
-                   self.target_dataset + "_test"]
+        
         accuracies = {}
-        for d_idx in range(len(dataloaders)):
-            loader = dataloaders[d_idx]
+        for d_idx in range(len(self.dataloaders)):
+            loader = self.dataloaders[d_idx]
             total_num = 0
             correct_num = 0
+            csv_file_name = self.runs_path + self.d_names[d_idx] + "_predictions.csv"
+            save_csv_file = open(csv_file_name, "w")
+            csv_writer = csv.writer(save_csv_file)
+            csv_writer.writerow(["Index", "True Label", "Predicted Label"])
             for idx, images, labels in loader:
                 images, labels = images.cuda(), labels.cuda()
                 with torch.no_grad():
@@ -278,10 +297,14 @@ class Experiment:
                     res, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
                     total_num += logits.size(0)
                     correct_num += res[0].item() * logits.size(0)
+                idx, labels, pred = idx.cpu().numpy(), labels.cpu().numpy(), pred.cpu().numpy()
+                for ind in range(pred.shape[0]):
+                    csv_writer.writerow([idx[ind], labels[ind], pred[ind]])
             acc = correct_num / total_num
-            print("Accuracy on dataset {}: {:.2f}".format(d_names[d_idx], acc))
-            accuracies[d_names[d_idx]] = acc
-            self.tb_writer.add_text(tag="Accuracy/" + d_names[d_idx], text_string=str(acc))
+            print("Accuracy on dataset {}: {:.2f}".format(self.d_names[d_idx], acc))
+            accuracies[self.d_names[d_idx]] = acc
+            self.tb_writer.add_text(tag="Accuracy/" + self.d_names[d_idx], text_string=str(acc))
+            save_csv_file.close()
         acc_file_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
                                  + self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/acc.json"
         import json
@@ -310,6 +333,7 @@ def get_parser():
     parser.add_argument("--starting-lr", "-lr", default=0.05, type=float)
     parser.add_argument("--final", default=False, action='store_true')
     parser.add_argument("--batchsize", "-b", default=64, type=int)
+    parser.add_argument("--mnist-default-aug", default=False, action='store_true')
 
     return vars(parser.parse_args())
 
