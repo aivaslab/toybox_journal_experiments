@@ -75,7 +75,9 @@ class DataLoaderGeneric(torchdata.Dataset):
             item = self.selected_indices[index]
         else:
             item = index
-        im = np.array(cv2.imdecode(self.images[item], 3))
+        im = cv2.imdecode(self.images[item], 3)
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        im = np.array(im)
         label = int(self.labels[item]["Class ID"])
         if self.transform is not None:
             im = self.transform(im)

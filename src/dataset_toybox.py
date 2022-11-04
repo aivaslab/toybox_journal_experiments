@@ -93,11 +93,15 @@ class ToyboxDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         if self.train:
             actual_index = self.indicesSelected[index]
-            img = np.array(cv2.imdecode(self.train_data[actual_index], 3))
+            img = cv2.imdecode(self.train_data[actual_index], 3)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = np.array(img)
             label = int(self.train_csvFile[actual_index][self.label_key])
         else:
             actual_index = index
-            img = np.array(cv2.imdecode(self.test_data[index], 3))
+            img = cv2.imdecode(self.test_data[index], 3)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = np.array(img)
             label = int(self.test_csvFile[index][self.label_key])
         
         if self.transform is not None:
