@@ -133,12 +133,19 @@ class Experiment:
         self.loaders = [self.loader_1, self.test_loader_1, self.loader_2, self.test_loader_2]
         self.loader_names = [self.source_dataset, self.source_dataset + "_test", self.target_dataset,
                              self.target_dataset + "_test"]
-        
+
+        if self.student.backbone_file == "":
+            self.backbone_opt_weight = 1
+        else:
+            self.backbone_opt_weight = 0.1
+
         self.teacher = self.teacher.cuda()
         self.student = self.student.cuda()
         init_lr = self.get_lr(batches=0)
-        self.optimizer = torch.optim.Adam(self.student.parameters(), lr=init_lr, weight_decay=1e-6)
-        
+        self.optimizer = torch.optim.Adam(self.student.classifier.parameters(), lr=init_lr, weight_decay=1e-6)
+        self.optimizer.add_param_group({'params': self.student.backbone.parameters(),
+                                        'lr': self.backbone_opt_weight * init_lr})
+
         import datetime
         self.exp_time = datetime.datetime.now()
         self.runs_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
@@ -261,10 +268,11 @@ class Experiment:
                 ep_ce_loss += ce_loss.item()
                 ep_self_loss += self_loss.item()
                 ep_tot_loss += total_loss.item()
-                tqdm_bar.set_description("Ep: {}/{}  LR: {:.4f}  CE: {:.3f}  Self-L: {:.3f} "
+                tqdm_bar.set_description("Ep: {}/{}  CLR: {:.4f}  BLR: {:.4f}  CE: {:.3f}  Self-L: {:.3f} "
                                          "Lmbda: {:.2f}  Trgt CE: {:.2f}  "
                                          "Tot Loss: {:.3f}".format(ep, self.num_epochs,
                                                                    self.optimizer.param_groups[0]['lr'],
+                                                                   self.optimizer.param_groups[1]['lr'],
                                                                    ep_ce_loss / ep_batches, ep_self_loss / ep_batches,
                                                                    alfa,
                                                                    val_ce_loss.item(), ep_tot_loss / ep_batches))
@@ -289,6 +297,7 @@ class Experiment:
                 
                 next_lr = self.get_lr(batches=total_batches)
                 self.optimizer.param_groups[0]['lr'] = next_lr
+                self.optimizer.param_groups[1]['lr'] = next_lr * self.backbone_opt_weight
             
             if ep % 5 == 0:
                 self.calc_test_losses(batches=total_batches)
