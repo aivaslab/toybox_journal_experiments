@@ -13,8 +13,8 @@ import os
 import csv
 
 import utils
-import DANN_network as DANNNetworks
-import DANN_dataset as DANNDatasets
+import networks
+import datasets
 
 OUT_DIR = "../out/DANN/"
 RUNS_DIR = "../runs/DANN/"
@@ -41,17 +41,17 @@ class Experiment:
         self.b_size = self.args['batchsize']
         self.mnist_special_aug = not self.args['mnist_default_aug']
 
-        net_args = {'backbone': self.backbone}
-        self.net = DANNNetworks.get_network(source_dataset=self.source_dataset, target_dataset=self.target_dataset,
-                                            args=net_args)
+        network_args = {'backbone': self.backbone, 'datasets': [self.source_dataset, self.target_dataset]}
+        self.net = networks.get_network_dann(args=network_args)
 
         dataset_args = {'normalize': self.normalize,
                         'train': True,
                         'hypertune': self.hypertune,
-                        'special_aug': self.mnist_special_aug
+                        'special_aug': self.mnist_special_aug,
+                        'pair': False
                         }
-        self.dataset1 = DANNDatasets.prepare_dataset(self.source_dataset, args=dataset_args)
-        self.dataset2 = DANNDatasets.prepare_dataset(self.target_dataset, args=dataset_args)
+        self.dataset1 = datasets.prepare_dataset(self.source_dataset, args=dataset_args)
+        self.dataset2 = datasets.prepare_dataset(self.target_dataset, args=dataset_args)
         print("{} -> {}".format(str(self.dataset1), str(self.dataset2)))
         print("{} -> {}".format(len(self.dataset1), len(self.dataset2)))
 
@@ -61,8 +61,8 @@ class Experiment:
                                              drop_last=True)
 
         dataset_args['train'] = False
-        self.test_dataset1 = DANNDatasets.prepare_dataset(self.source_dataset, args=dataset_args)
-        self.test_dataset2 = DANNDatasets.prepare_dataset(self.target_dataset, args=dataset_args)
+        self.test_dataset1 = datasets.prepare_dataset(self.source_dataset, args=dataset_args)
+        self.test_dataset2 = datasets.prepare_dataset(self.target_dataset, args=dataset_args)
 
         self.test_loader_1 = torchdata.DataLoader(self.test_dataset1, batch_size=2 * self.b_size, num_workers=4)
         self.test_loader_2 = torchdata.DataLoader(self.test_dataset2, batch_size=2 * self.b_size, num_workers=4)
@@ -102,7 +102,7 @@ class Experiment:
         
     def save_batch_images(self):
         """Save one batch of images for all dataloaders"""
-        mean, std = DANNDatasets.get_mean_std(dataset=self.source_dataset)
+        mean, std = datasets.get_mean_std(dataset=self.source_dataset)
         _, img1, _ = next(iter(self.loader_1))
         src_images = utils.get_images(images=img1, mean=mean, std=std)
         src_images.save(self.runs_path + "source_images_train.png")
@@ -110,7 +110,7 @@ class Experiment:
         src_images = utils.get_images(images=img2, mean=mean, std=std)
         src_images.save(self.runs_path + "source_images_test.png")
 
-        mean, std = DANNDatasets.get_mean_std(dataset=self.target_dataset)
+        mean, std = datasets.get_mean_std(dataset=self.target_dataset)
         _, img1, _ = next(iter(self.loader_2))
         src_images = utils.get_images(images=img1, mean=mean, std=std)
         src_images.save(self.runs_path + "target_images_train.png")
@@ -290,6 +290,7 @@ class Experiment:
             save_csv_file = open(csv_file_name, "w")
             csv_writer = csv.writer(save_csv_file)
             csv_writer.writerow(["Index", "True Label", "Predicted Label"])
+            
             for idx, images, labels in loader:
                 images, labels = images.cuda(), labels.cuda()
                 with torch.no_grad():
@@ -300,6 +301,7 @@ class Experiment:
                 idx, labels, pred = idx.cpu().numpy(), labels.cpu().numpy(), pred.cpu().numpy()
                 for ind in range(pred.shape[0]):
                     csv_writer.writerow([idx[ind], labels[ind], pred[ind]])
+            
             acc = correct_num / total_num
             print("Accuracy on dataset {}: {:.2f}".format(self.d_names[d_idx], acc))
             accuracies[self.d_names[d_idx]] = acc
