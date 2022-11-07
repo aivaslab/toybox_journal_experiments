@@ -11,10 +11,11 @@ import torch.utils.tensorboard as tb
 import math
 import argparse
 import os
+import csv
 
 import utils
-import self_ensemble_network
-import self_ensemble_dataset
+import networks
+import datasets
 
 OUT_DIR = "../out/Self-Ensemble/"
 RUNS_DIR = "../runs/Self-Ensemble/"
@@ -89,10 +90,11 @@ class Experiment:
         self.b_size = self.args['batchsize']
         self.debug = self.args['debug']
         self.class_balance = self.args['class_balance']
+        self.mnist_special_aug = not self.args['mnist_default_aug']
         
-        network_args = {'backbone': self.backbone}
-        self.teacher = self_ensemble_network.get_network(source=self.source_dataset, args=network_args)
-        self.student = self_ensemble_network.get_network(source=self.source_dataset, args=network_args)
+        network_args = {'backbone': self.backbone, 'datasets': [self.source_dataset, self.target_dataset]}
+        self.teacher = networks.get_network(args=network_args)
+        self.student = networks.get_network(args=network_args)
         self.teacher.backbone.load_state_dict(self.student.backbone.state_dict())
         self.teacher.classifier.load_state_dict(self.student.classifier.state_dict())
         
@@ -105,10 +107,13 @@ class Experiment:
         for params in self.student.classifier.parameters():
             params.requires_grad = True
         
-        dataset_args = {'train': True, 'hypertune': self.hypertune, 'target': False}
-        self.dataset1 = self_ensemble_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
-        dataset_args['target'] = True
-        self.dataset2 = self_ensemble_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
+        dataset_args = {'train': True,
+                        'hypertune': self.hypertune,
+                        'pair': False,
+                        'special_aug': self.mnist_special_aug}
+        self.dataset1 = datasets.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
+        dataset_args['pair'] = True
+        self.dataset2 = datasets.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
         print("{} -> {}".format(str(self.dataset1), str(self.dataset2)))
         print("{} -> {}".format(len(self.dataset1), len(self.dataset2)))
         
@@ -117,9 +122,9 @@ class Experiment:
         self.loader_2 = torchdata.DataLoader(self.dataset2, batch_size=self.b_size, shuffle=True, num_workers=4,
                                              drop_last=True)
         dataset_args['train'] = False
-        dataset_args['target'] = False
-        self.test_dataset1 = self_ensemble_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
-        self.test_dataset2 = self_ensemble_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
+        dataset_args['pair'] = False
+        self.test_dataset1 = datasets.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
+        self.test_dataset2 = datasets.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
         self.test_loader_1 = torchdata.DataLoader(self.test_dataset1, batch_size=2 * self.b_size, shuffle=False,
                                                   num_workers=4)
         self.test_loader_2 = torchdata.DataLoader(self.test_dataset2, batch_size=2 * self.b_size, shuffle=False,
@@ -141,6 +146,7 @@ class Experiment:
         self.tb_writer = tb.SummaryWriter(log_dir=self.runs_path)
         print("Saving experiment tracking data to {}...".format(self.runs_path))
         self.save_args(path=self.runs_path)
+        self.save_batch_images()
     
     def save_args(self, path):
         """Save the experiment args in json file"""
@@ -162,6 +168,28 @@ class Experiment:
             p = (batches - 2 * len(self.loader_2)) / (total_batches - 2 * len(self.loader_2))
             lr = 0.5 * self.starting_lr * (1 + math.cos(math.pi * p))
         return lr
+    
+    def save_batch_images(self):
+        """Save one batch of images for all dataloaders"""
+
+        mean, std = datasets.get_mean_std(dataset=self.source_dataset)
+        _, img1, _ = next(iter(self.loader_1))
+        src_images = utils.get_images(images=img1, mean=mean, std=std)
+        src_images.save(self.runs_path + "source_images_train.png")
+        _, img2, _ = next(iter(self.test_loader_1))
+        src_images = utils.get_images(images=img2, mean=mean, std=std)
+        src_images.save(self.runs_path + "source_images_test.png")
+
+        mean, std = datasets.get_mean_std(dataset=self.target_dataset)
+        _, (img2_1, img2_2), _ = next(iter(self.loader_2))
+        trgt_images_1 = utils.get_images(images=img2_1, mean=mean, std=std)
+        trgt_images_1.save(self.runs_path + "target_images_train_1.png")
+        trgt_images_2 = utils.get_images(images=img2_2, mean=mean, std=std)
+        trgt_images_2.save(self.runs_path + "target_images_train_2.png")
+    
+        _, img2, _ = next(iter(self.test_loader_2))
+        src_images = utils.get_images(images=img2, mean=mean, std=std)
+        src_images.save(self.runs_path + "target_images_test.png")
 
     def update_teacher(self, alpha=0.99):
         """EMA update for the teacher's weights"""
@@ -197,21 +225,10 @@ class Experiment:
                 
                 img1, labels1 = img1.cuda(), labels1.cuda()
                 img2_1, img2_2, labels2 = img2_1.cuda(), img2_2.cuda(), labels2.cuda()
-                
-                if total_batches == 0:
-                    mean, std = self_ensemble_dataset.get_mean_std(dataset=self.source_dataset)
-                    src_images = utils.get_images(images=img1, mean=mean, std=std)
-                    src_images.save(self.runs_path + "source_images_batch_1.png")
-                    
-                    mean, std = self_ensemble_dataset.get_mean_std(dataset=self.target_dataset)
-                    trgt_images_1 = utils.get_images(images=img2_1, mean=mean, std=std)
-                    trgt_images_1.save(self.runs_path + "target_images_1_batch_1.png")
-                    trgt_images_2 = utils.get_images(images=img2_2, mean=mean, std=std)
-                    trgt_images_2.save(self.runs_path + "target_images_2_batch_1.png")
                     
                 if self.combined_batch:
                     img = torch.concat([img1, img2_1], dim=0)
-                    logits = self.student.forward(img)
+                    _, logits = self.student.forward(img)
                     ssize = img1.shape[0]
                     s_l = logits[:ssize]
                     t_l = logits[ssize:]
@@ -219,14 +236,14 @@ class Experiment:
                     if total_batches == 0 and self.debug:
                         print(img1.size(), img2_1.size(), img.size(), s_l.size(), logits.size())
                 else:
-                    s_l = self.student.forward(img1)
-                    t_l = self.student.forward(img2_1)
+                    _, s_l = self.student.forward(img1)
+                    _, t_l = self.student.forward(img2_1)
                     if total_batches == 0 and self.debug:
                         print(img1.size(), img2_1.size(), s_l.size(), t_l.size())
                 
                 target_probs = torch.softmax(t_l, dim=1)
                 with torch.no_grad():
-                    teacher_logits = self.teacher.forward(img2_2)
+                    _, teacher_logits = self.teacher.forward(img2_2)
                     teacher_probs = torch.softmax(teacher_logits, dim=1)
                 
                 ce_loss = nn.CrossEntropyLoss()(s_l, labels1)
@@ -296,7 +313,7 @@ class Experiment:
         for _, images, labels in self.test_loader_2:
             images, labels = images.cuda(), labels.cuda()
             with torch.no_grad():
-                t_l = self.teacher.forward(images)
+                _, t_l = self.teacher.forward(images)
                 batch_ce = nn.CrossEntropyLoss()(t_l, labels)
                 total_ce += batch_ce.item()
                 batches_total += 1
@@ -314,20 +331,32 @@ class Experiment:
             loader = self.loaders[d_idx]
             total_num = 0
             correct_num = 0
+            
+            csv_file_name = self.runs_path + self.loader_names[d_idx] + "_predictions.csv"
+            save_csv_file = open(csv_file_name, "w")
+            csv_writer = csv.writer(save_csv_file)
+            csv_writer.writerow(["Index", "True Label", "Predicted Label"])
+            
             for idx, images, labels in loader:
                 # For pair datasets, images is a list of two image batches. Select first of those for processing.
                 images = images[0] if isinstance(images, list) else images
                 
                 images, labels = images.cuda(), labels.cuda()
                 with torch.no_grad():
-                    logits = self.teacher.forward(images)
+                    _, logits = self.teacher.forward(images)
                     res, pred = utils.calc_accuracy(output=logits, target=labels, topk=(1,))
                     total_num += logits.size(0)
                     correct_num += res[0].item() * logits.size(0)
+                idx, labels, pred = idx.cpu().numpy(), labels.cpu().numpy(), pred.cpu().numpy()
+                for ind in range(pred.shape[0]):
+                    csv_writer.writerow([idx[ind], labels[ind], pred[ind]])
+                
             acc = correct_num / total_num
             print("Accuracy on {}: {:.2f}".format(self.loader_names[d_idx], acc))
             accuracies[self.loader_names[d_idx]] = acc
             self.tb_writer.add_text(tag="Accuracy/" + self.loader_names[d_idx], text_string=str(acc))
+            save_csv_file.close()
+            
         acc_file_path = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" \
                                  + self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/acc.json"
         import json
@@ -356,6 +385,7 @@ def get_parser():
     parser.add_argument("--batchsize", "-b", default=64, type=int)
     parser.add_argument("--debug", default=False, action='store_true')
     parser.add_argument("--class-balance", "-cb", default=False, action='store_true')
+    parser.add_argument("--mnist-default-aug", default=False, action='store_true')
     
     return vars(parser.parse_args())
 
