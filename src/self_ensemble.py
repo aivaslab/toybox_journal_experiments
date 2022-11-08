@@ -308,9 +308,11 @@ class Experiment:
                       self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
             os.makedirs(out_dir, exist_ok=False)
             print("Saving model components to {}".format(out_dir))
-            torch.save(self.teacher.state_dict(), out_dir + "teacher_final.pt")
-            torch.save(self.student.state_dict(), out_dir + "student_final.pt")
-    
+            torch.save(self.teacher.backbone.state_dict(), out_dir + "teacher_backbone_final.pt")
+            torch.save(self.teacher.classifer.state_dict(), out_dir + "teacher_classifier_final.pt")
+            torch.save(self.student.backbone.state_dict(), out_dir + "student_backbone_final.pt")
+            torch.save(self.student.classifier.state_dict(), out_dir + "student_classifier_final.pt")
+
     def calc_test_losses(self, batches):
         """
         Pass dataset through network and calculate losses
