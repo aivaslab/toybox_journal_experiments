@@ -112,7 +112,8 @@ class Experiment:
         log_probs = torch.nn.LogSoftmax(dim=1)(logits)
         probs = torch.exp(log_probs)
         entropy = log_probs * probs
-        entropy = -entropy.mean()
+        entropy = torch.sum(-entropy, dim=1)
+        entropy = entropy.mean()
         return entropy
     
     def train(self):
@@ -139,8 +140,8 @@ class Experiment:
                     loader_2_iter = iter(self.loader_2)
                     idx2, img2, labels2 = next(loader_2_iter)
                 self.optimizer.zero_grad()
-                alfa = 0.01  # 2 / (1 + math.exp(-10 * p)) - 1
-                beta = 0.1
+                alfa = 0.2  # 2 / (1 + math.exp(-10 * p)) - 1
+                beta = 0.2
                 
                 img1, labels1 = img1.cuda(), labels1.cuda()
                 img2 = img2.cuda()
@@ -163,10 +164,12 @@ class Experiment:
                 ce_loss = nn.CrossEntropyLoss()(s_l, labels1)
                 total_batches += 1
                 entropy = self.entropy_loss(logits=t_l)
-                mean_activation = torch.sum(t_l, dim=0, keepdim=True) / len(img2)
+                t_p = torch.softmax(t_l, dim=1)
+                mean_activation = torch.sum(t_p, dim=0, keepdim=True) / len(img2)
                 if total_batches == 1 and self.debug:
-                    print(mean_activation.shape)
-                diversity_loss = self.entropy_loss(mean_activation)
+                    print(mean_activation.shape, mean_activation, torch.sum(mean_activation),
+                          torch.special.entr(mean_activation))
+                diversity_loss = torch.sum(torch.special.entr(mean_activation))
                 total_loss = ce_loss + alfa * entropy - beta * diversity_loss
                 total_loss.backward()
                 self.optimizer.step()
