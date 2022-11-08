@@ -12,8 +12,8 @@ import torch.utils.tensorboard as tb
 import matplotlib.pyplot as plt
 
 import utils
-import JAN_network
-import JAN_dataset
+import networks
+import datasets
 
 OUT_DIR = "../out/Entropy/"
 RUNS_DIR = "../runs/Entropy/"
@@ -41,10 +41,10 @@ class Experiment:
         self.debug = self.args['debug']
         
         network_args = {'backbone': self.backbone, 'datasets': [self.source_dataset, self.target_dataset]}
-        self.net = JAN_network.get_network(args=network_args)
-        dataset_args = {'train': True, 'hypertune': self.hypertune}
-        self.dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
-        self.dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
+        self.net = networks.get_network(args=network_args)
+        dataset_args = {'train': True, 'hypertune': self.hypertune, 'pair': False}
+        self.dataset1 = datasets.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
+        self.dataset2 = datasets.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
         print("{} -> {}".format(str(self.dataset1), str(self.dataset2)))
         
         self.loader_1 = torchdata.DataLoader(self.dataset1, batch_size=self.b_size, shuffle=True, num_workers=4,
@@ -56,8 +56,8 @@ class Experiment:
             print(str(self.dataset2), ":", utils.online_mean_and_sd(self.loader_2))
         
         dataset_args['train'] = False
-        self.test_dataset1 = JAN_dataset.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
-        self.test_dataset2 = JAN_dataset.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
+        self.test_dataset1 = datasets.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
+        self.test_dataset2 = datasets.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
         self.test_loader_1 = torchdata.DataLoader(self.test_dataset1, batch_size=2 * self.b_size, shuffle=False,
                                                   num_workers=4)
         self.test_loader_2 = torchdata.DataLoader(self.test_dataset2, batch_size=2 * self.b_size, shuffle=False,
@@ -110,7 +110,6 @@ class Experiment:
     def entropy_loss(logits):
         """Entropy Loss calculation"""
         log_probs = torch.nn.LogSoftmax(dim=1)(logits)
-        # log_logits = torch.clamp(torch.log2(logits), max=10000, min=-10000)
         probs = torch.exp(log_probs)
         entropy = log_probs * probs
         entropy = -entropy.mean()
@@ -131,6 +130,7 @@ class Experiment:
             ep_batches = 0
             ep_ce_loss = 0
             ep_entropy_loss = 0
+            ep_diversity_loss = 0
             ep_tot_loss = 0
             for idx1, img1, labels1 in tqdm_bar:
                 try:
@@ -140,6 +140,7 @@ class Experiment:
                     idx2, img2, labels2 = next(loader_2_iter)
                 self.optimizer.zero_grad()
                 alfa = 0.01  # 2 / (1 + math.exp(-10 * p)) - 1
+                beta = 0.1
                 
                 img1, labels1 = img1.cuda(), labels1.cuda()
                 img2 = img2.cuda()
@@ -162,7 +163,11 @@ class Experiment:
                 ce_loss = nn.CrossEntropyLoss()(s_l, labels1)
                 total_batches += 1
                 entropy = self.entropy_loss(logits=t_l)
-                total_loss = ce_loss + alfa * entropy
+                mean_activation = torch.sum(t_l, dim=0, keepdim=True) / len(img2)
+                if total_batches == 1 and self.debug:
+                    print(mean_activation.shape)
+                diversity_loss = self.entropy_loss(mean_activation)
+                total_loss = ce_loss + alfa * entropy - beta * diversity_loss
                 total_loss.backward()
                 self.optimizer.step()
                 
@@ -170,14 +175,16 @@ class Experiment:
                 ep_ce_loss += ce_loss.item()
                 ep_entropy_loss += entropy.item()
                 ep_tot_loss += total_loss.item()
-                tqdm_bar.set_description("Ep: {}/{}  BLR: {:.4f}  CLR: {:.4f}  CE Loss: {:.4f}  Entropy Loss: {:.4f} "
-                                         "Lmbda: {:.4f}  "
-                                         "Tot Loss: {:.4f}".format(ep, self.num_epochs,
-                                                                   self.optimizer.param_groups[0]['lr'],
-                                                                   self.optimizer.param_groups[1]['lr'],
-                                                                   ep_ce_loss / ep_batches,
-                                                                   ep_entropy_loss / ep_batches, alfa,
-                                                                   ep_tot_loss / ep_batches))
+                ep_diversity_loss += diversity_loss.item()
+                tqdm_bar.set_description("Ep: {}/{} BLR: {:.3f} CLR: {:.3f} CE: {:.3f} Ent: {:.3f} "
+                                         "Div: {:.3f} a: {:.3f} b: {:.3f} "
+                                         "Tot: {:.3f}".format(ep, self.num_epochs,
+                                                              self.optimizer.param_groups[0]['lr'],
+                                                              self.optimizer.param_groups[1]['lr'],
+                                                              ep_ce_loss / ep_batches,
+                                                              ep_entropy_loss / ep_batches,
+                                                              ep_diversity_loss / ep_batches, alfa, beta,
+                                                              ep_tot_loss / ep_batches))
                 
                 self.tb_writer.add_scalar(tag="LR", scalar_value=self.optimizer.param_groups[0]['lr'],
                                           global_step=total_batches)
@@ -185,12 +192,14 @@ class Experiment:
                 self.tb_writer.add_scalars(main_tag="Training",
                                            tag_scalar_dict={'CE Loss (Batch)': ce_loss.item(),
                                                             'Entropy Loss (Batch)': entropy.item(),
+                                                            'Diversity Loss (Batch': diversity_loss.item(),
                                                             'Total Loss (Batch)': total_loss.item()
                                                             },
                                            global_step=total_batches)
                 self.tb_writer.add_scalars(main_tag="Training",
                                            tag_scalar_dict={'CE Loss (Epoch Avg)': ep_ce_loss / ep_batches,
                                                             'Entropy Loss (Epoch Avg)': ep_entropy_loss / ep_batches,
+                                                            'Diversity Loss (Epoch Avg)': ep_diversity_loss / ep_batches,
                                                             'Total Loss (Epoch Avg)': ep_tot_loss / ep_batches
                                                             },
                                            global_step=total_batches)
