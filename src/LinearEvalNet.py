@@ -1,4 +1,5 @@
 """Module to implement the Linear Evaluator"""
+import os.path
 
 import torchvision.models as models
 import torch
@@ -32,7 +33,7 @@ class ResNet18WithActivations(nn.Module):
         self.backbone_file = backbone_file
         self.backbone = models.resnet18(pretrained=False)
         self.backbone.fc = nn.Identity()
-        self.backbone.load_state_dict(torch.load(self.backbone_file))
+        # self.backbone.load_state_dict(torch.load(self.backbone_file))
         
         for module in self.MODULES:
             module_ = self.backbone.__getattr__(module)
@@ -65,31 +66,32 @@ class ResNet18WithActivations(nn.Module):
             raise NotImplementedError("Forward hook for layer {} not implemented...".format(name))
         activation = self.output_dict[name]
         reduced = self.MAX_POOLS[name](activation)
+        print(activation.shape, reduced.shape)
         return reduced.view(activation.size(0), -1)
 
 
 class MNIST50NetworkWithActivations(nn.Module):
     """Network for the MNIST50 -> SVHN-B experiments"""
 
-    def __init__(self):
-        super(MNIST50NetworkWithActivations, self).__init__()
+    MODULES = ['drop_1', 'drop_2', 'relu_3_3', 'avgpool']
 
-        self.old_backbone = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
-            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
-            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
-            nn.MaxPool2d(kernel_size=(2, 2)), nn.Dropout(),
-            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
-            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
-            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(3, 3), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
-            nn.MaxPool2d(kernel_size=(2, 2)), nn.Dropout(),
-            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=(3, 3), padding=0), nn.BatchNorm2d(512), nn.ReLU(),
-            nn.Conv2d(in_channels=512, out_channels=256, kernel_size=(1, 1), padding=1), nn.BatchNorm2d(256), nn.ReLU(),
-            nn.Conv2d(in_channels=256, out_channels=128, kernel_size=(1, 1), padding=1), nn.BatchNorm2d(128), nn.ReLU(),
-            nn.AvgPool2d(kernel_size=6)
-        )
-        print(sum([p.numel() for p in self.old_backbone.parameters()]))
-        
+    MAX_POOLS = {
+        'drop_1': nn.MaxPool2d(kernel_size=5, stride=5),
+        'drop_2': nn.MaxPool2d(kernel_size=4, stride=4),
+        'relu_3_3': nn.MaxPool2d(kernel_size=2, stride=2),
+        'avgpool': nn.Identity()
+    }
+
+    FC_SIZES = {
+        'drop_1': 1152,
+        'drop_2': 1024,
+        'relu_3_3': 1152,
+        'avgpool': 128,
+    }
+    
+    def __init__(self, backbone_file):
+        super(MNIST50NetworkWithActivations, self).__init__()
+        self.backbone_file = backbone_file
         self.backbone = nn.Sequential()
         self.backbone.add_module('conv_1_1', nn.Conv2d(in_channels=3, out_channels=128, kernel_size=(3, 3), padding=1))
         self.backbone.add_module('bn_1_1', nn.BatchNorm2d(128))
@@ -126,28 +128,49 @@ class MNIST50NetworkWithActivations(nn.Module):
         self.backbone.add_module('bn_3_1', nn.BatchNorm2d(512))
         self.backbone.add_module('relu_3_1', nn.ReLU())
         self.backbone.add_module('conv_3_2', nn.Conv2d(in_channels=512, out_channels=256, kernel_size=(1, 1),
-                                                       padding=1))
+                                                       padding=0))
         self.backbone.add_module('bn_3_2', nn.BatchNorm2d(256))
         self.backbone.add_module('relu_3_2', nn.ReLU())
         self.backbone.add_module('conv_3_3', nn.Conv2d(in_channels=256, out_channels=128, kernel_size=(1, 1),
-                                                       padding=1))
+                                                       padding=0))
         self.backbone.add_module('bn_3_3', nn.BatchNorm2d(128))
         self.backbone.add_module('relu_3_3', nn.ReLU())
         self.backbone.add_module('avgpool', nn.AvgPool2d(kernel_size=6))
         
-        print(sum([p.numel() for p in self.backbone.parameters()]))
-        print(len(self.backbone.state_dict().keys()))
-        print(len(self.old_backbone.state_dict().keys()))
-        self.backbone.load_state_dict(self.old_backbone.state_dict())
-        
-        self.classifier = nn.Linear(in_features=128, out_features=10)
+        self.backbone.load_state_dict(torch.load(self.backbone_file))
+
+        for module in self.MODULES:
+            module_ = self.backbone.__getattr__(module)
+            module_.register_forward_hook(self.get_hook(module))
+
+        self.activation = None
+        self.output_dict = {}
+        self.input_dict = {}
+
+    def __str__(self):
+        return "MNIST50Network With Activations"
+
+    def get_hook(self, name):
+        """kn"""
+    
+        def act(model, inp, output):
+            """ s"""
+            self.output_dict[name] = output.squeeze().detach()
+            self.input_dict[name] = inp[0].squeeze().detach()
+    
+        return act
+    
+    def get_activation(self, name):
+        """Returns activation after forward pass"""
+        if name not in self.MODULES:
+            raise NotImplementedError("Forward hook for layer {} not implemented...".format(name))
+        activation = self.output_dict[name]
+        reduced = self.MAX_POOLS[name](activation)
+        return reduced
 
     def forward(self, x):
         """Forward prop for the network"""
-        feats = self.backbone.forward(x)
-        feats_view = feats.view(feats.size(0), -1)
-        logits = self.classifier(feats_view)
-        return logits
+        self.backbone.forward(x)
 
     def set_train_mode(self):
         """
@@ -166,16 +189,16 @@ class MNIST50NetworkWithActivations(nn.Module):
 
 def main():
     """Main method"""
-    res = MNIST50NetworkWithActivations()
-    # with torch.no_grad():
-    #     inp = torch.rand(size=(3, 3, 224, 224))
-    #     res.forward(inp)
-    # for mod in ['conv1', 'layer1', 'layer2', 'layer3', 'layer4', 'avgpool', 'fc']:
-    #     fc_size = res.FC_SIZES[mod]
-    #     activation = res.get_activation(mod)
-    #     print(mod, activation.shape)
-    #     layer = nn.Linear(fc_size, 12)
-    #     print(layer.forward(activation).shape)
+    res = ResNet18WithActivations(backbone_file="")
+    with torch.no_grad():
+        inp = torch.rand(size=(3, 3, 224, 224))
+        res.forward(inp)
+    for mod in res.MODULES:
+        activation = res.get_activation(mod)
+        print(mod, activation.shape, activation.view(activation.size(0), -1).shape)
+        layer = nn.Linear(res.FC_SIZES[mod], 12)
+        activation = activation.view(activation.size(0), -1)
+        print(layer.forward(activation).shape)
 
 
 if __name__ == "__main__":

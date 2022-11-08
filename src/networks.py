@@ -64,11 +64,11 @@ class MNIST50Backbone(nn.Module):
         self.network.add_module('bn_3_1', nn.BatchNorm2d(512))
         self.network.add_module('relu_3_1', nn.ReLU())
         self.network.add_module('conv_3_2', nn.Conv2d(in_channels=512, out_channels=256, kernel_size=(1, 1),
-                                                      padding=1))
+                                                      padding=0))
         self.network.add_module('bn_3_2', nn.BatchNorm2d(256))
         self.network.add_module('relu_3_2', nn.ReLU())
         self.network.add_module('conv_3_3', nn.Conv2d(in_channels=256, out_channels=128, kernel_size=(1, 1),
-                                                      padding=1))
+                                                      padding=0))
         self.network.add_module('bn_3_3', nn.BatchNorm2d(128))
         self.network.add_module('relu_3_3', nn.ReLU())
         self.network.add_module('avgpool', nn.AvgPool2d(kernel_size=6))
