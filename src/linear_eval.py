@@ -34,7 +34,7 @@ class Experiment:
         self.starting_lr = args['lr']
         self.layer = args['layer']
         self.args = args
-        self.backbone = "../out/TOYBOX_BASELINE_FINAL/Aug-13-2022-00-00/backbone_trainer_resnet18_backbone.pt"
+        self.backbone = args['backbone']
         self.args['backbone'] = self.backbone
         self.debug = args['debug']
         
@@ -181,6 +181,7 @@ def get_parser():
     parser.add_argument("--lr", '-lr', default=0.1, type=float)
     parser.add_argument("--layer", '-l', required=True, type=str)
     parser.add_argument("--debug", default=False, action='store_true')
+    parser.add_argument("--backbone", "-bb", required=True, type=str)
     return vars(parser.parse_args())
 
 
