@@ -9,8 +9,8 @@ import torchvision.transforms as transforms
 
 import utils
 
-IN12_MEAN = (0.4541, 0.4845, 0.4980)
-IN12_STD = (0.2928, 0.2738, 0.2756)
+IN12_MEAN = (0.4980, 0.4845, 0.4541)
+IN12_STD = (0.2756, 0.2738, 0.2928)
 
 
 class DataLoaderGeneric(torchdata.Dataset):

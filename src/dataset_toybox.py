@@ -13,8 +13,8 @@ import torch.utils.data
 
 import utils
 
-TOYBOX_MEAN = (0.3499, 0.4374, 0.5199)
-TOYBOX_STD = (0.1623, 0.1894, 0.1775)
+TOYBOX_MEAN = (0.5199, 0.4374, 0.3499)
+TOYBOX_STD = (0.1775, 0.1894, 0.1623)
 TOYBOX_DATA_PATH = "../data_12/Toybox/"
 
 toybox_classes = ["airplane", "ball", "car", "cat", "cup", "duck", "giraffe", "helicopter", "horse", "mug", "spoon",
