@@ -26,7 +26,11 @@ RUNS_DIR = "../runs/LinearEval/"
 
 class Experiment:
     """Class with linear evaluation methods"""
-    NETWORKS = {'object': LinearEvalNet.ResNet18WithActivations}
+    NETWORKS = {'object': LinearEvalNet.ResNet18WithActivations,
+                'digit': LinearEvalNet.MNIST50NetworkWithActivations}
+    
+    NUM_CLASSES = {'object': 12,
+                   'digit': 10}
     
     def __init__(self, args):
         self.experiment = args['experiment']

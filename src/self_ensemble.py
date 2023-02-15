@@ -228,7 +228,7 @@ class Experiment:
                     idx1, img1, labels1 = next(loader_1_iter)
                 self.optimizer.zero_grad()
                 p = total_batches / (len(self.loader_2) * self.num_epochs)
-                alfa = 3  # 2 / (1 + math.exp(-10 * p)) - 1
+                alfa = 2 / (1 + math.exp(-10 * p)) - 1
                 
                 img1, labels1 = img1.cuda(), labels1.cuda()
                 img2_1, img2_2, labels2 = img2_1.cuda(), img2_2.cuda(), labels2.cuda()

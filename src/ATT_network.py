@@ -52,23 +52,23 @@ class SVHNNetwork(Network):
                                       nn.ReLU(),
                                       nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2), padding=1),
                                       nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(5, 5), padding='same'),
-                                      nn.ReLU(), nn.Dropout(),
+                                      nn.ReLU(), nn.Dropout(p=0.5),
                                       View(),
-                                      nn.Linear(8192, 3072), nn.ReLU(), nn.Dropout()
+                                      nn.Linear(8192, 3072), nn.ReLU(), nn.Dropout(p=0.5)
                                       )
         
         self.classifier_source_1 = nn.Sequential()
         self.classifier_source_1.add_module("fc_1", nn.Linear(3072, 2048))
         self.classifier_source_1.add_module("bn", nn.BatchNorm1d(num_features=2048))
         self.classifier_source_1.add_module("relu", nn.ReLU())
-        self.classifier_source_1.add_module("dropout", nn.Dropout())
+        self.classifier_source_1.add_module("dropout", nn.Dropout(p=0.5))
         self.classifier_source_1.add_module("fc_2", nn.Linear(2048, 10))
 
         self.classifier_source_2 = nn.Sequential()
         self.classifier_source_2.add_module("fc_1", nn.Linear(3072, 2048))
         self.classifier_source_2.add_module("bn", nn.BatchNorm1d(num_features=2048))
         self.classifier_source_2.add_module("relu", nn.ReLU())
-        self.classifier_source_2.add_module("dropout", nn.Dropout())
+        self.classifier_source_2.add_module("dropout", nn.Dropout(p=0.5))
         self.classifier_source_2.add_module("fc_2", nn.Linear(2048, 10))
 
         self.classifier_target = nn.Sequential()

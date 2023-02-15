@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.autograd import Function
 import torch
 import torchvision.models as models
+import networks
 
 
 class GradReverse(Function):
@@ -180,10 +181,10 @@ def get_network(source_dataset, target_dataset, args):
     if source_dataset == 'svhn' or target_dataset == 'svhn':
         return SVHNNetwork()
     elif source_dataset == 'mnist50' and target_dataset == 'svhn-b':
-        return MNIST50Network()
+        return networks.MNIST50DANNNetwork()
     elif 'mnist' in source_dataset and 'mnist' in target_dataset:
         return MNISTNetwork()
     elif 'toybox' in source_dataset or 'toybox' in target_dataset:
-        return ToyboxNetwork(init_args=args)
+        return networks.ToyboxDANNNetwork(init_args=args)
     raise NotImplementedError("Network for src: {} and trgt: {} not implemented...".format(source_dataset,
                                                                                            target_dataset))

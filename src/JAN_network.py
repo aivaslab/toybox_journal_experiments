@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import os
+import networks
 
 
 class JANNet(torch.nn.Module):
@@ -80,8 +81,8 @@ class MNIST50Network(nn.Module):
 def get_network(args):
     """Returns the specified model for JAN experiments"""
     if 'toybox' in args['datasets']:
-        return JANNet(backbone_file=args['backbone'], num_classes=12)
+        return networks.ToyboxJANNetwork(backbone_file=args['backbone'])
     elif 'mnist50' in args['datasets']:
-        return MNIST50Network()
+        return networks.MNIST50JANNetwork()
     else:
         return JANNet(backbone_file=args['backbone'], num_classes=31)
