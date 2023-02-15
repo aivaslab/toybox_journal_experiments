@@ -35,6 +35,7 @@ class Experiment:
         self.source_dataset = self.args['dataset_source']
         self.target_dataset = self.args['dataset_target']
         self.num_epochs = self.args['num_epochs']
+        self.num_iters = self.args['num_iters']
         self.normalize = not self.args['no_normalize']
         self.lr_anneal = self.args['anneal']
         self.backbone = self.args['backbone']
@@ -45,15 +46,19 @@ class Experiment:
         self.b_size = self.args['batchsize']
         self.debug = self.args['debug']
         self.mnist_special_aug = not self.args['mnist_default_aug']
+        self.source_fraction = self.args['source_fraction']
+        self.target_fraction = self.args['target_fraction']
         
         network_args = {'backbone': self.backbone, 'datasets': [self.source_dataset, self.target_dataset]}
         self.net = networks.get_network(args=network_args)
         dataset_args = {'train': True,
                         'hypertune': self.hypertune,
                         'special_aug': self.mnist_special_aug,
-                        'pair': False
+                        'pair': False,
+                        'fraction': self.source_fraction
                         }
         self.dataset1 = datasets.prepare_dataset(d_name=self.source_dataset, args=dataset_args)
+        dataset_args['fraction'] = self.target_fraction
         self.dataset2 = datasets.prepare_dataset(d_name=self.target_dataset, args=dataset_args)
         print("{} -> {}".format(str(self.dataset1), str(self.dataset2)))
         print("{} -> {}".format(len(self.dataset1), len(self.dataset2)))
@@ -136,12 +141,12 @@ class Experiment:
             else:
                 lr = mu_0
         else:
-            total_batches = len(self.loader_2) * self.num_epochs
+            total_batches = self.num_iters * self.num_epochs
             batches = int(p * total_batches)
-            if batches < 2 * len(self.loader_2):
-                lr = (batches + 1) * self.starting_lr / (2 * len(self.loader_2))
+            if batches < 2 * self.num_iters:
+                lr = (batches + 1) * self.starting_lr / (2 * self.num_iters)
             else:
-                p = (batches - 2 * len(self.loader_2)) / (total_batches - 2 * len(self.loader_2))
+                p = (batches - 2 * self.num_iters) / (total_batches - 2 * self.num_iters)
                 lr = 0.5 * self.starting_lr * (1 + math.cos(math.pi * p))
         return lr
 
@@ -154,22 +159,20 @@ class Experiment:
         self.net.classifier.train()
 
         total_batches = 0
-        loader_1_iter = iter(self.loader_1)
+        forever_loader_1 = utils.ForeverDataLoader(self.loader_1)
+        forever_loader_2 = utils.ForeverDataLoader(self.loader_2)
         for ep in range(1, self.num_epochs + 1):
-            tqdm_bar = tqdm.tqdm(self.loader_2, ncols=150)
+            tqdm_bar = tqdm.tqdm(total=self.num_iters, ncols=150)
             ep_batches = 0
             ep_ce_loss = 0
             ep_jmmd_loss = 0
             ep_tot_loss = 0
-            for idx2, img2, labels2 in tqdm_bar:
-                try:
-                    idx1, img1, labels1 = next(loader_1_iter)
-                except StopIteration:
-                    loader_1_iter = iter(self.loader_1)
-                    idx1, img1, labels1 = next(loader_1_iter)
+            for it in range(1, self.num_iters + 1):
+                idx2, img2, labels2 = forever_loader_2.get_next_batch()
+                idx1, img1, labels1 = forever_loader_1.get_next_batch()
                     
                 self.optimizer.zero_grad()
-                p = total_batches / (len(self.loader_2) * self.num_epochs)
+                p = total_batches / (self.num_iters * self.num_epochs)
                 alfa = 2 / (1 + math.exp(-10 * p)) - 1
 
                 img1, labels1 = img1.cuda(), labels1.cuda()
@@ -192,7 +195,7 @@ class Experiment:
                 
                 ce_loss = nn.CrossEntropyLoss()(s_l, labels1)
                 total_batches += 1
-                p = total_batches / (len(self.loader_2) * self.num_epochs)
+                p = total_batches / (self.num_iters * self.num_epochs)
                 jmmd_loss = self.jmmd_loss((s_f, func.softmax(s_l, dim=1)), (t_f, func.softmax(t_l, dim=1)))
                 total_loss = ce_loss + alfa * jmmd_loss
                 total_loss.backward()
@@ -204,6 +207,7 @@ class Experiment:
                 ep_ce_loss += ce_loss.item()
                 ep_jmmd_loss += jmmd_loss.item()
                 ep_tot_loss += total_loss.item()
+                
                 tqdm_bar.set_description("Ep: {}/{}  BLR: {:.4f}  CLR: {:.3f}  CE: {:.3f}  JMMD: {:.3f} "
                                          "Lmbda: {:.2f}  Trgt CE: {:.2f}  "
                                          "Tot Loss: {:.3f}".format(ep, self.num_epochs,
@@ -211,6 +215,7 @@ class Experiment:
                                                                    self.optimizer.param_groups[1]['lr'],
                                                                    ep_ce_loss/ep_batches, ep_jmmd_loss/ep_batches, alfa,
                                                                    val_ce_loss.item(), ep_tot_loss/ep_batches))
+                tqdm_bar.update(n=1)
 
                 self.tb_writer.add_scalar(tag="LR", scalar_value=self.optimizer.param_groups[0]['lr'],
                                           global_step=total_batches)
@@ -234,6 +239,7 @@ class Experiment:
                 self.optimizer.param_groups[0]['lr'] = next_lr * self.backbone_opt_weight
                 self.optimizer.param_groups[1]['lr'] = next_lr
             
+            tqdm_bar.close()
             if ep % 5 == 0:
                 self.calc_test_losses(batches=total_batches)
                 self.net.classifier.train()
@@ -319,7 +325,8 @@ def get_parser():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--dataset_source", "-d1", required=True, choices=DATASETS)
     parser.add_argument("--dataset_target", "-d2", required=True, choices=DATASETS)
-    parser.add_argument("--num-epochs", "-e", default=100, type=int)
+    parser.add_argument("--num-epochs", "-e", default=20, type=int)
+    parser.add_argument("--num-iters", "-it", default=500, type=int)
     parser.add_argument("--anneal", "-a", default=False, action='store_true')
     parser.add_argument("--no-normalize", "-nn", default=False, action='store_true')
     parser.add_argument("--backbone", "-bb", default="", type=str)
@@ -330,6 +337,8 @@ def get_parser():
     parser.add_argument("--batchsize", "-b", default=64, type=int)
     parser.add_argument("--debug", default=False, action='store_true')
     parser.add_argument("--mnist-default-aug", default=False, action='store_true')
+    parser.add_argument("--source-fraction", "-sf", default=1.0, type=float)
+    parser.add_argument("--target-fraction", "-tf", default=1.0, type=float)
 
     return vars(parser.parse_args())
 

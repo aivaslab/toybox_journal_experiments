@@ -4,6 +4,9 @@ Module with datasets for DANN, JAN and SE methods
 import torch.utils.data as torchdata
 import torchvision.transforms as transforms
 import numpy as np
+import pickle
+import csv
+import cv2
 
 import self_ensemble_aug
 import dataset_mnist50
@@ -22,6 +25,13 @@ IN12_STD = (0.2756, 0.2738, 0.2928)
 TOYBOX_MEAN = (0.5199, 0.4374, 0.3499)
 TOYBOX_STD = (0.1775, 0.1894, 0.1623)
 
+OFFICE31_DATASETS = ["amazon", "dslr", "webcam"]
+OFFICE31_AMAZON_MEAN = (0.7841, 0.7862, 0.7923)
+OFFICE31_AMAZON_STD = (0.3201, 0.3182, 0.3157)
+OFFICE31_DSLR_MEAN = (0.4064, 0.4487, 0.4709)
+OFFICE31_DSLR_STD = (0.2025, 0.1949, 0.2067)
+OFFICE31_WEBCAM_MEAN = (0.6172, 0.6187, 0.6120)
+OFFICE31_WEBCAM_STD = (0.2589, 0.2568, 0.2519)
 TOYBOX_DATA_PATH = "../data_12/Toybox/"
 IN12_DATA_PATH = "../data_12/IN-12/"
 
@@ -36,6 +46,12 @@ def get_mean_std(dataset):
         mean, std = TOYBOX_MEAN, TOYBOX_STD
     elif dataset == 'in12':
         mean, std = IN12_MEAN, IN12_STD
+    elif dataset == "amazon":
+        mean, std = OFFICE31_AMAZON_MEAN, OFFICE31_AMAZON_STD
+    elif dataset == "dslr":
+        mean, std = OFFICE31_DSLR_MEAN, OFFICE31_DSLR_STD
+    elif dataset == "webcam":
+        mean, std = OFFICE31_WEBCAM_MEAN, OFFICE31_WEBCAM_STD
     else:
         raise NotImplementedError("Mean and std for dataset {} has not been specified".format(dataset))
     return mean, std
@@ -84,6 +100,21 @@ def get_transform(dataset, mean, std, train):
                         transforms.Resize(224),
                         transforms.ToTensor(),
                         transforms.Normalize(mean=IN12_MEAN, std=IN12_STD)]
+    elif dataset in OFFICE31_DATASETS:
+        if train:
+            trnsfrms = [transforms.ToPILImage(),
+                        transforms.Resize(256),
+                        transforms.RandomResizedCrop(size=(224, 224)),
+                        transforms.RandomHorizontalFlip(p=0.5),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=mean, std=std)
+                        ]
+        else:
+            trnsfrms = [transforms.ToPILImage(),
+                        transforms.Resize(224),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=mean, std=std)
+                        ]
     else:
         raise NotImplementedError("Transform for dataset {} not specified...".format(dataset))
     transform = transforms.Compose(trnsfrms)
@@ -114,6 +145,9 @@ def get_dataset(d_name, args):
         return DatasetToybox(root=TOYBOX_DATA_PATH, train=args['train'], transform=args['transform'], instances=-1,
                              images=ims, hypertune=args['hypertune'])
     
+    if d_name in OFFICE31_DATASETS:
+        return DatasetOffice31(domain=d_name, transform=args['transform'], fraction=args['fraction'])
+    
     raise NotImplementedError("Transform for dataset {} has not been specified".format(d_name))
 
 
@@ -121,9 +155,61 @@ def prepare_dataset(d_name, args):
     """Prepare and returh the dataset specified"""
     mean, std = get_mean_std(dataset=d_name)
     args['transform'] = get_transform(d_name, mean, std, train=args['train'])
+    if 'fraction' not in args.keys():
+        args['fraction'] = 1.0
     
     dataset = get_dataset(d_name=d_name, args=args)
     return dataset
+
+
+class DatasetOffice31(torchdata.Dataset):
+    """
+    Dataset Class for Office-31 images
+    """
+    AMAZON_IMAGES_PATH = "../../DATASETS/office-31/amazon.pkl"
+    AMAZON_LABELS_PATH = "../../DATASETS/office-31/amazon.csv"
+    DSLR_IMAGES_PATH = "../../DATASETS/office-31/dslr.pkl"
+    DSLR_LABELS_PATH = "../../DATASETS/office-31/dslr.csv"
+    WEBCAM_IMAGES_PATH = "../../DATASETS/office-31/webcam.pkl"
+    WEBCAM_LABELS_PATH = "../../DATASETS/office-31/webcam.csv"
+    DOMAINS = ['amazon', 'dslr', 'webcam']
+    
+    def __init__(self, domain, transform=None, fraction=1.0):
+        assert domain in self.DOMAINS
+        self.domain = domain
+        self.transform = transform
+        self.fraction = fraction
+        self.rng = np.random.default_rng()
+        
+        if self.domain == 'amazon':
+            self.IMAGES_PATH = self.AMAZON_IMAGES_PATH
+            self.LABELS_PATH = self.AMAZON_LABELS_PATH
+        elif self.domain == 'dslr':
+            self.IMAGES_PATH = self.DSLR_IMAGES_PATH
+            self.LABELS_PATH = self.DSLR_LABELS_PATH
+        else:
+            self.IMAGES_PATH = self.WEBCAM_IMAGES_PATH
+            self.LABELS_PATH = self.WEBCAM_LABELS_PATH
+        
+        images_file = open(self.IMAGES_PATH, "rb")
+        labels_file = open(self.LABELS_PATH, "r")
+        self.images = pickle.load(images_file)
+        self.labels = list(csv.DictReader(labels_file))
+        self.selected_indices = self.rng.integers(low=0, high=len(self.labels) - 1,
+                                                  size=int(self.fraction * len(self.labels)))
+    
+    def __len__(self):
+        return len(self.selected_indices)
+    
+    def __getitem__(self, index):
+        item = self.selected_indices[index]
+        img, label = np.array(cv2.imdecode(self.images[item], 3)), int(self.labels[item]['Class ID'])
+        if self.transform:
+            img = self.transform(img)
+        return item, img, label
+    
+    def __str__(self):
+        return "Office-31 " + self.domain
 
 
 class DatasetMNIST50(torchdata.Dataset):

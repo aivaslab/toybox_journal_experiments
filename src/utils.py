@@ -6,6 +6,24 @@ import argparse
 import logging
 
 
+class ForeverDataLoader:
+    """Class that returns the next batch of data"""
+    
+    def __init__(self, loader):
+        self.loader = loader
+        self.loader_iter = iter(self.loader)
+    
+    def get_next_batch(self):
+        """Return next_batch"""
+        try:
+            indices, images, labels = next(self.loader_iter)
+        except StopIteration:
+            self.loader_iter = iter(self.loader)
+            indices, images, labels = next(self.loader_iter)
+        
+        return indices, images, labels
+
+
 def calc_accuracy(output, target, topk=(1,)):
     """
     Computes the accuracy over the k top predictions for the specified values of k
