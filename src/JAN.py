@@ -20,7 +20,6 @@ import utils
 import datasets
 import networks
 
-OUT_DIR = "../out/JAN/"
 RUNS_DIR = "../runs/JAN/"
 DATASETS = ['amazon', 'dslr', 'webcam', 'toybox', 'in12', 'mnist50', 'svhn-b']
 
@@ -246,7 +245,7 @@ class Experiment:
                 self.net.backbone.train()
 
         if self.save:
-            out_dir = OUT_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" + \
+            out_dir = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" + \
                       self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
             os.makedirs(out_dir, exist_ok=False)
             print("Saving model components to {}".format(out_dir))
