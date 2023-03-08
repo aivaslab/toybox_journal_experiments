@@ -245,12 +245,9 @@ class Experiment:
                 self.net.backbone.train()
 
         if self.save:
-            out_dir = RUNS_DIR + self.source_dataset.upper() + "_" + self.target_dataset.upper() + "/exp_" + \
-                      self.exp_time.strftime("%b-%d-%Y-%H-%M") + "/"
-            os.makedirs(out_dir, exist_ok=False)
-            print("Saving model components to {}".format(out_dir))
-            torch.save(self.net.backbone.state_dict(), out_dir + "backbone_final.pt")
-            torch.save(self.net.classifier.state_dict(), out_dir + "classifier_final.pt")
+            print("Saving model components to {}".format(self.runs_path))
+            torch.save(self.net.backbone.state_dict(), self.runs_path + "backbone_final.pt")
+            torch.save(self.net.classifier.state_dict(), self.runs_path + "classifier_final.pt")
 
     def calc_test_losses(self, batches):
         """
