@@ -111,6 +111,8 @@ class Trainer:
             'classifier': self.classifier.state_dict(),
         }
         if self.args['save_name'] != "":
+            if not self.args['save_name'].endswith(".pt"):
+                self.args['save_name'] += ".pt"
             torch.save(save_dict, OUT_PATH + self.args['save_name'])
     
     def eval(self):
