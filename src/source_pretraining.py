@@ -77,7 +77,7 @@ class Trainer:
         """Training method"""
         total_batches = 0
         for ep in range(1, self.args['epochs'] + 1):
-            tqdmBar = tqdm.tqdm(total=len(self.train_loader))
+            tqdmBar = tqdm.tqdm(total=len(self.train_loader), ncols=150)
             ep_batches = 0
             ep_total_loss = 0.0
             self.set_model_train()
@@ -110,7 +110,8 @@ class Trainer:
             'backbone': self.network.state_dict(),
             'classifier': self.classifier.state_dict(),
         }
-        torch.save(save_dict, OUT_PATH + "temp.pt")
+        if self.args['save_name'] != "":
+            torch.save(save_dict, OUT_PATH + self.args['save_name'])
     
     def eval(self):
         """Eval method"""
@@ -141,6 +142,7 @@ def get_parser():
     parser.add_argument("--dataset", "-d", required=True, choices=['amazon', 'dslr', 'webcam'])
     parser.add_argument("--epochs", "-e", default=50, type=int)
     parser.add_argument("--lr", "-lr", default=0.05, type=float)
+    parser.add_argument("--save-name", "-sn", default="", type=str)
     return parser.parse_args()
     
     
