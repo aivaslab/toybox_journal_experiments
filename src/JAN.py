@@ -86,6 +86,8 @@ class Experiment:
         classifier_lr = self.get_lr(p=0.0)
         self.optimizer = torch.optim.SGD(self.net.backbone.parameters(), lr=classifier_lr*self.backbone_opt_weight,
                                          weight_decay=1e-5, momentum=0.9)
+        if isinstance(self.net, networks.OfficeJANNetwork):
+            self.optimizer.add_param_group({'params': self.net.bottleneck.parameters(), 'lr': classifier_lr})
         self.optimizer.add_param_group({'params': self.net.classifier.parameters(), 'lr': classifier_lr})
         self.jmmd_loss = jan.JointMultipleKernelMaximumMeanDiscrepancy(
             kernels=([kernels.GaussianKernel(alpha=2 ** k) for k in range(-3, 2)],
@@ -154,8 +156,7 @@ class Experiment:
         Train network
         """
         self.calc_test_losses(batches=0)
-        self.net.backbone.train()
-        self.net.classifier.train()
+        self.net.set_train_mode()
 
         total_batches = 0
         forever_loader_1 = utils.ForeverDataLoader(self.loader_1)
@@ -237,16 +238,19 @@ class Experiment:
                 next_lr = self.get_lr(p=p)
                 self.optimizer.param_groups[0]['lr'] = next_lr * self.backbone_opt_weight
                 self.optimizer.param_groups[1]['lr'] = next_lr
+                if len(self.optimizer.param_groups) > 2:
+                    self.optimizer.param_groups[2]['lr'] = next_lr
             
             tqdm_bar.close()
             if ep % 5 == 0:
                 self.calc_test_losses(batches=total_batches)
-                self.net.classifier.train()
-                self.net.backbone.train()
+                self.net.set_train_mode()
 
         if self.save:
             print("Saving model components to {}".format(self.runs_path))
             torch.save(self.net.backbone.state_dict(), self.runs_path + "backbone_final.pt")
+            if isinstance(self.net, networks.OfficeJANNetwork):
+                torch.save(self.net.bottleneck.state_dict(), self.runs_path + "bottleneck_final.pt")
             torch.save(self.net.classifier.state_dict(), self.runs_path + "classifier_final.pt")
 
     def calc_test_losses(self, batches):
@@ -255,8 +259,7 @@ class Experiment:
         """
         total_ce = 0.0
         batches_total = 0
-        self.net.backbone.eval()
-        self.net.classifier.eval()
+        self.net.set_eval_mode()
         
         for _, images, labels in self.test_loader_2:
             images, labels = images.cuda(), labels.cuda()
@@ -273,8 +276,7 @@ class Experiment:
         """
         Eval network on test datasets
         """
-        self.net.backbone.eval()
-        self.net.classifier.eval()
+        self.net.set_eval_mode()
         accuracies = {}
         for d_idx in range(len(self.loaders)):
             loader = self.loaders[d_idx]

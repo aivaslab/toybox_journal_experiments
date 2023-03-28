@@ -261,7 +261,13 @@ class OfficeJANNetwork(torch.nn.Module):
             self.backbone = models.resnet18(weights=None)
         self.fc_size = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
-        self.classifier = nn.Linear(self.fc_size, self.num_classes)
+        self.bottleneck_size = 256
+        self.bottleneck = nn.Sequential(nn.Linear(self.fc_size, self.bottleneck_size),
+                                        nn.BatchNorm1d(self.bottleneck_size),
+                                        nn.ReLU(),
+                                        nn.Dropout(0.5))
+        
+        self.classifier = nn.Linear(self.bottleneck_size, self.num_classes)
         if self.backbone_file != "" and self.backbone_file != "imagenet":
             print("Loading backbone weights from {}...".format(self.backbone_file))
             loaded_file = torch.load(self.backbone_file)
@@ -277,8 +283,9 @@ class OfficeJANNetwork(torch.nn.Module):
         """
         feats = self.backbone(x)
         feats_view = feats.view(feats.size(0), -1)
-        logits = self.classifier(feats_view)
-        return feats, logits
+        bottleneck_feat = self.bottleneck(feats_view)
+        logits = self.classifier(bottleneck_feat)
+        return bottleneck_feat, logits
     
     def validate_backbone_file(self):
         """Validate backbone file"""
@@ -291,13 +298,15 @@ class OfficeJANNetwork(torch.nn.Module):
         Set all params in training mode
         """
         self.backbone.train()
+        self.bottleneck.train()
         self.classifier.train()
 
     def set_eval_mode(self):
         """
-        Set all params in training mode
+        Set all params in eval mode
         """
         self.backbone.eval()
+        self.bottleneck.eval()
         self.classifier.eval()
     
 
